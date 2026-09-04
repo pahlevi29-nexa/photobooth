@@ -1,681 +1,881 @@
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, onBeforeUnmount } from 'vue'
 import { templates } from '~/data/templates'
 
 const route = useRoute()
 
-const templateId = Number(route.query.template || 1)
+// =====================================================
+// TEMPLATE
+// =====================================================
 
-const template = templates.find(
-  item => item.id === templateId
-) || templates[0]
+const templateId = computed(() => {
+  const id = Number(route.query.template || 1)
+  return Number.isFinite(id) ? id : 1
+})
+
+const template = computed(() => {
+  return (
+    templates.find(item => item.id === templateId.value) ||
+    templates[0]
+  )
+})
+
+// =====================================================
+// CAMERA
+// =====================================================
 
 const video = ref<HTMLVideoElement | null>(null)
-const canvas = ref<HTMLCanvasElement | null>(null)
-
 const stream = ref<MediaStream | null>(null)
+
+const cameraReady = ref(false)
+const cameraLoading = ref(false)
+const cameraError = ref('')
+
+const cameraFacing = ref<'user' | 'environment'>('user')
+
+// =====================================================
+// PHOTO
+// =====================================================
 
 const photos = ref<string[]>([])
 
-const cameraReady = ref(false)
-const cameraError = ref('')
+const isTakingPhoto = ref(false)
 
-const isCounting = ref(false)
-const countdown = ref(3)
-const isFinished = ref(false)
+const countdown = ref<number | null>(null)
 
-const currentPhoto = ref(1)
+const currentPhoto = computed(() => {
+  return photos.value.length + 1
+})
 
+const totalPhotos = 4
 
-// ================================
-// START CAMERA
-// ================================
+const progress = computed(() => {
+  return `${Math.min(currentPhoto.value, totalPhotos)}/${totalPhotos}`
+})
+
+// =====================================================
+// FLASH
+// =====================================================
+
+const flash = ref(false)
+
+// =====================================================
+// CAMERA START
+// =====================================================
 
 const startCamera = async () => {
-
   cameraError.value = ''
+  cameraLoading.value = true
 
   try {
-
+    // Pastikan browser mendukung kamera
     if (!navigator.mediaDevices?.getUserMedia) {
       throw new Error(
-        'Browser tidak mendukung kamera.'
+        'Browser tidak mendukung akses kamera.'
       )
     }
 
-    stream.value =
-      await navigator.mediaDevices.getUserMedia({
-        video: {
-          facingMode: {
-            ideal: 'user'
-          },
-          width: {
-            ideal: 1280
-          },
-          height: {
-            ideal: 720
-          }
+    // Matikan kamera lama
+    stopCamera()
+
+    const constraints: MediaStreamConstraints = {
+      video: {
+        facingMode: cameraFacing.value,
+
+        width: {
+          ideal: 1280
         },
-        audio: false
-      })
 
-    if (video.value) {
+        height: {
+          ideal: 720
+        }
+      },
 
-      video.value.srcObject =
-        stream.value
-
-      await video.value.play()
-
-      cameraReady.value = true
+      audio: false
     }
 
-  } catch (error) {
+    const newStream =
+      await navigator.mediaDevices.getUserMedia(
+        constraints
+      )
 
-    console.error(error)
+    stream.value = newStream
 
-    cameraError.value =
-      'Kamera tidak dapat dibuka. Pastikan izin kamera sudah diberikan kepada browser.'
+    if (!video.value) {
+      throw new Error(
+        'Video element belum tersedia.'
+      )
+    }
 
+    video.value.srcObject = newStream
+
+    video.value.muted = true
+
+    video.value.setAttribute(
+      'playsinline',
+      'true'
+    )
+
+    video.value.setAttribute(
+      'webkit-playsinline',
+      'true'
+    )
+
+    // Tunggu metadata video
+    await new Promise<void>((resolve, reject) => {
+      if (!video.value) {
+        reject(
+          new Error('Video tidak tersedia.')
+        )
+        return
+      }
+
+      const currentVideo = video.value
+
+      if (
+        currentVideo.readyState >= 2 &&
+        currentVideo.videoWidth > 0
+      ) {
+        resolve()
+        return
+      }
+
+      const timeout = window.setTimeout(() => {
+        reject(
+          new Error(
+            'Kamera terlalu lama merespons.'
+          )
+        )
+      }, 10000)
+
+      currentVideo.onloadedmetadata = () => {
+        window.clearTimeout(timeout)
+        resolve()
+      }
+    })
+
+    await video.value.play()
+
+    cameraReady.value = true
+
+  } catch (error: any) {
+    console.error(
+      'Camera error:',
+      error
+    )
+
+    cameraReady.value = false
+
+    if (
+      error?.name ===
+      'NotAllowedError'
+    ) {
+      cameraError.value =
+        'Izin kamera ditolak. Izinkan kamera pada pengaturan browser.'
+    } else if (
+      error?.name ===
+      'NotFoundError'
+    ) {
+      cameraError.value =
+        'Kamera tidak ditemukan pada perangkat ini.'
+    } else if (
+      error?.name ===
+      'NotReadableError'
+    ) {
+      cameraError.value =
+        'Kamera sedang digunakan aplikasi lain.'
+    } else if (
+      error?.name ===
+      'OverconstrainedError'
+    ) {
+      cameraError.value =
+        'Kamera tidak mendukung pengaturan ini. Coba ganti kamera.'
+    } else {
+      cameraError.value =
+        'Kamera tidak dapat dibuka. Pastikan situs menggunakan HTTPS dan izin kamera sudah diberikan.'
+    }
+
+  } finally {
+    cameraLoading.value = false
   }
 }
 
-
-// ================================
+// =====================================================
 // STOP CAMERA
-// ================================
+// =====================================================
 
 const stopCamera = () => {
-
   if (stream.value) {
-
     stream.value
       .getTracks()
-      .forEach(track => track.stop())
+      .forEach(track => {
+        track.stop()
+      })
 
     stream.value = null
   }
 
+  if (video.value) {
+    video.value.srcObject = null
+  }
+
+  cameraReady.value = false
 }
 
+// =====================================================
+// SWITCH CAMERA
+// =====================================================
 
-// ================================
+const switchCamera = async () => {
+  if (isTakingPhoto.value) return
+
+  cameraFacing.value =
+    cameraFacing.value === 'user'
+      ? 'environment'
+      : 'user'
+
+  await startCamera()
+}
+
+// =====================================================
 // COUNTDOWN
-// ================================
+// =====================================================
 
-const startCountdown = async () => {
+const wait = (ms: number) => {
+  return new Promise(resolve =>
+    setTimeout(resolve, ms)
+  )
+}
 
-  if (!cameraReady.value) {
-    return
-  }
-
-  if (isCounting.value) {
-    return
-  }
-
-  if (photos.value.length >= 4) {
-    return
-  }
-
-  isCounting.value = true
-
+const runCountdown = async () => {
   countdown.value = 3
-
-  await wait(1000)
+  await wait(900)
 
   countdown.value = 2
-
-  await wait(1000)
+  await wait(900)
 
   countdown.value = 1
+  await wait(900)
 
-  await wait(1000)
-
-  countdown.value = 0
-
-  await wait(250)
-
-  takePhoto()
-
-  isCounting.value = false
-
+  countdown.value = null
 }
 
+// =====================================================
+// CAPTURE PHOTO
+// =====================================================
 
-// ================================
-// TAKE PHOTO
-// ================================
-
-const takePhoto = () => {
-
-  if (!video.value || !canvas.value) {
+const capturePhoto = async () => {
+  if (
+    !video.value ||
+    !cameraReady.value ||
+    isTakingPhoto.value
+  ) {
     return
   }
 
-  const ctx =
-    canvas.value.getContext('2d')
-
-  if (!ctx) {
+  if (
+    photos.value.length >= totalPhotos
+  ) {
+    goToResult()
     return
   }
+
+  isTakingPhoto.value = true
+
+  // Countdown
+  await runCountdown()
+
+  if (!video.value) {
+    isTakingPhoto.value = false
+    return
+  }
+
+  const currentVideo = video.value
 
   const width =
-    video.value.videoWidth
+    currentVideo.videoWidth || 1280
 
   const height =
-    video.value.videoHeight
+    currentVideo.videoHeight || 720
 
-  canvas.value.width = width
-  canvas.value.height = height
+  const canvas =
+    document.createElement('canvas')
 
-  /*
-   * Kamera depan biasanya mirror.
-   * Kita mirror hasil foto supaya terasa natural.
-   */
+  canvas.width = width
+  canvas.height = height
 
-  ctx.save()
+  const ctx =
+    canvas.getContext('2d')
 
-  ctx.translate(width, 0)
+  if (!ctx) {
+    isTakingPhoto.value = false
+    return
+  }
 
-  ctx.scale(-1, 1)
+  // Mirror kamera depan
+  if (
+    cameraFacing.value === 'user'
+  ) {
+    ctx.translate(
+      width,
+      0
+    )
+
+    ctx.scale(
+      -1,
+      1
+    )
+  }
 
   ctx.drawImage(
-    video.value,
+    currentVideo,
     0,
     0,
     width,
     height
   )
 
-  ctx.restore()
+  // Flash
+  flash.value = true
+
+  setTimeout(() => {
+    flash.value = false
+  }, 180)
 
   const image =
-    canvas.value.toDataURL(
+    canvas.toDataURL(
       'image/jpeg',
       0.92
     )
 
   photos.value.push(image)
 
-  currentPhoto.value =
-    photos.value.length + 1
+  isTakingPhoto.value = false
 
-  if (photos.value.length >= 4) {
+  // Kalau sudah 4 foto
+  if (
+    photos.value.length >= totalPhotos
+  ) {
+    await wait(700)
 
-    isFinished.value = true
-
-    stopCamera()
-
-    savePhotos()
-
+    goToResult()
   }
-
 }
 
+// =====================================================
+// RESULT
+// =====================================================
 
-// ================================
-// SAVE PHOTOS
-// ================================
-
-const savePhotos = () => {
+const goToResult = () => {
+  stopCamera()
 
   localStorage.setItem(
     'photobooth_photos',
-    JSON.stringify(photos.value)
+    JSON.stringify(
+      photos.value
+    )
   )
-
-  localStorage.setItem(
-    'photobooth_template',
-    JSON.stringify(template)
-  )
-
-}
-
-
-// ================================
-// RETAKE
-// ================================
-
-const retake = async () => {
-
-  photos.value = []
-
-  currentPhoto.value = 1
-
-  isFinished.value = false
-
-  await startCamera()
-
-}
-
-
-// ================================
-// GO RESULT
-// ================================
-
-const goResult = () => {
-
-  savePhotos()
 
   navigateTo(
-    `/result?template=${template.id}`
+    `/result?template=${templateId.value}`
   )
-
 }
 
+// =====================================================
+// RESET
+// =====================================================
 
-// ================================
-// BACK
-// ================================
+const resetPhotos = () => {
+  photos.value = []
+}
 
-const goBack = () => {
+// =====================================================
+// HOME
+// =====================================================
 
+const goHome = () => {
   stopCamera()
 
   navigateTo('/')
-
 }
 
-
-// ================================
-// WAIT
-// ================================
-
-const wait = (ms: number) => {
-
-  return new Promise(resolve => {
-
-    setTimeout(resolve, ms)
-
-  })
-
-}
-
-
-// ================================
-// LIFECYCLE
-// ================================
-
-onMounted(() => {
-
-  startCamera()
-
-})
+// =====================================================
+// CLEANUP
+// =====================================================
 
 onBeforeUnmount(() => {
-
   stopCamera()
-
 })
 </script>
 
-
 <template>
-
   <div class="camera-page">
 
+    <!-- ========================================= -->
     <!-- HEADER -->
+    <!-- ========================================= -->
 
     <header class="camera-header">
 
       <button
         class="back-button"
-        @click="goBack"
+        @click="goHome"
       >
-        ←
-        <span>Kembali</span>
+        <span class="back-icon">
+          ←
+        </span>
+
+        <span>
+          Kembali
+        </span>
       </button>
 
-      <div class="header-title">
+      <div class="brand">
+        <span class="brand-camera">
+          📸
+        </span>
 
-        <span>📸</span>
-
-        <strong>
-          {{ template.name }}
-        </strong>
-
+        <span>
+          Film Memories
+        </span>
       </div>
 
-      <div class="photo-progress">
-
-        {{ Math.min(photos.length + 1, 4) }}/4
-
+      <div class="progress">
+        {{ progress }}
       </div>
 
     </header>
 
 
+    <!-- ========================================= -->
     <!-- MAIN -->
+    <!-- ========================================= -->
 
     <main class="camera-main">
 
+      <!-- ======================================= -->
+      <!-- INSTRUCTION -->
+      <!-- ======================================= -->
 
-      <!-- LEFT -->
+      <section class="instruction">
+
+        <div class="photo-number">
+          PHOTO {{ currentPhoto }}
+        </div>
+
+        <h1>
+          {{ photos.length === 0
+            ? 'Get ready!'
+            : photos.length < totalPhotos
+              ? 'Great shot!'
+              : 'All done!'
+          }}
+        </h1>
+
+        <p>
+          <span v-if="photos.length === 0">
+            Pose however you like.
+            We'll take 4 photos.
+          </span>
+
+          <span
+            v-else-if="
+              photos.length < totalPhotos
+            "
+          >
+            Siapkan pose berikutnya.
+            Foto {{ photos.length + 1 }}
+            dari {{ totalPhotos }}.
+          </span>
+
+          <span v-else>
+            Semua foto sudah selesai!
+          </span>
+        </p>
+
+      </section>
+
+
+      <!-- ======================================= -->
+      <!-- CAMERA -->
+      <!-- ======================================= -->
 
       <section class="camera-section">
 
-        <div class="instruction">
+        <div class="camera-card">
 
-          <span class="small-label">
-            PHOTO {{ Math.min(photos.length + 1, 4) }}
-          </span>
+          <div class="camera-wrapper">
 
-          <h1>
-            Get ready!
-          </h1>
+            <!-- CAMERA VIDEO -->
 
-          <p>
-            Pose however you like.
-            We'll take 4 photos.
-          </p>
+            <video
+              ref="video"
+              v-show="cameraReady"
+              autoplay
+              muted
+              playsinline
+              webkit-playsinline
+              class="camera-video"
+            />
 
-        </div>
-
-
-        <!-- CAMERA -->
-
-        <div class="camera-wrapper">
-
-          <video
-            ref="video"
-            autoplay
-            muted
-            playsinline
-            class="camera-video"
-          />
-
-          <!-- COUNTDOWN -->
-
-          <Transition name="countdown">
+            <!-- CAMERA NOT STARTED -->
 
             <div
-              v-if="isCounting"
-              class="countdown"
+              v-if="
+                !cameraReady &&
+                !cameraLoading &&
+                !cameraError
+              "
+              class="camera-start"
             >
 
-              {{ countdown }}
+              <div class="camera-start-icon">
+                📸
+              </div>
+
+              <h2>
+                Siap Foto?
+              </h2>
+
+              <p>
+                Izinkan kamera HP
+                untuk mulai mengambil
+                foto.
+              </p>
+
+              <button
+                class="start-camera-button"
+                @click="startCamera"
+              >
+                📷 Aktifkan Kamera
+              </button>
 
             </div>
 
-          </Transition>
 
+            <!-- CAMERA LOADING -->
 
-          <!-- CAMERA ERROR -->
+            <div
+              v-if="cameraLoading"
+              class="camera-start"
+            >
 
-          <div
-            v-if="cameraError"
-            class="camera-error"
-          >
+              <div class="spinner"></div>
 
-            <div class="error-icon">
-              📷
+              <h2>
+                Membuka kamera...
+              </h2>
+
+              <p>
+                Tunggu sebentar.
+              </p>
+
             </div>
 
-            <h3>
-              Kamera belum tersedia
-            </h3>
 
-            <p>
-              {{ cameraError }}
-            </p>
+            <!-- CAMERA ERROR -->
 
-            <button
-              @click="startCamera"
-              class="retry-button"
+            <div
+              v-if="cameraError"
+              class="camera-start error-box"
             >
-              Coba Lagi
-            </button>
+
+              <div class="camera-start-icon error-icon">
+                ⚠️
+              </div>
+
+              <h2>
+                Kamera tidak bisa dibuka
+              </h2>
+
+              <p>
+                {{ cameraError }}
+              </p>
+
+              <button
+                class="start-camera-button"
+                @click="startCamera"
+              >
+                🔄 Coba Lagi
+              </button>
+
+            </div>
+
+
+            <!-- COUNTDOWN -->
+
+            <Transition name="countdown">
+
+              <div
+                v-if="countdown !== null"
+                class="countdown"
+              >
+                {{ countdown }}
+              </div>
+
+            </Transition>
+
+
+            <!-- FLASH -->
+
+            <Transition name="flash">
+
+              <div
+                v-if="flash"
+                class="flash"
+              ></div>
+
+            </Transition>
+
+
+            <!-- CAMERA CONTROLS -->
+
+            <div
+              v-if="cameraReady"
+              class="camera-controls"
+            >
+
+              <button
+                class="camera-control"
+                @click="switchCamera"
+                :disabled="isTakingPhoto"
+                title="Ganti kamera"
+              >
+                🔄
+              </button>
+
+            </div>
+
+
+            <!-- PHOTO COUNT -->
+
+            <div
+              v-if="cameraReady"
+              class="camera-counter"
+            >
+
+              <span>
+                {{ photos.length }}
+              </span>
+
+              /
+              {{ totalPhotos }}
+
+            </div>
 
           </div>
 
-        </div>
 
-
-        <!-- CONTROLS -->
-
-        <div class="controls">
+          <!-- =================================== -->
+          <!-- TAKE PHOTO BUTTON -->
+          <!-- =================================== -->
 
           <button
-            v-if="!isFinished"
+            v-if="cameraReady"
             class="capture-button"
-            :disabled="
-              !cameraReady ||
-              isCounting
-            "
-            @click="startCountdown"
+            :disabled="isTakingPhoto"
+            @click="capturePhoto"
           >
 
-            <span class="camera-icon">
+            <span
+              v-if="!isTakingPhoto"
+            >
               📸
+              Ambil Foto
             </span>
 
-            <span>
-              {{ isCounting
-                ? 'Bersiap...'
-                : 'Ambil Foto'
-              }}
+            <span
+              v-else
+            >
+              Bersiap...
             </span>
 
           </button>
 
 
-          <div
-            v-if="isFinished"
-            class="finished-controls"
+          <!-- =================================== -->
+          <!-- RETAKE -->
+          <!-- =================================== -->
+
+          <button
+            v-if="photos.length > 0"
+            class="reset-button"
+            @click="resetPhotos"
+            :disabled="isTakingPhoto"
           >
-
-            <button
-              class="secondary-button"
-              @click="retake"
-            >
-              ↻ Ulangi
-            </button>
-
-            <button
-              class="primary-button"
-              @click="goResult"
-            >
-              Lihat Hasil →
-            </button>
-
-          </div>
-
-        </div>
-
-
-        <!-- TIPS -->
-
-        <div class="tips">
-
-          <span>💡</span>
-
-          <div>
-
-            <strong>
-              Tips
-            </strong>
-
-            <p>
-              Cari tempat dengan pencahayaan
-              yang cukup dan lihat ke kamera.
-            </p>
-
-          </div>
+            ↻ Ulangi Semua Foto
+          </button>
 
         </div>
 
       </section>
 
 
-      <!-- RIGHT PREVIEW -->
+      <!-- ======================================= -->
+      <!-- PHOTO PREVIEW -->
+      <!-- ======================================= -->
 
-      <aside class="preview-section">
+      <section
+        v-if="photos.length > 0"
+        class="preview-section"
+      >
 
-        <div class="preview-header">
+        <div class="preview-title">
 
           <div>
-
-            <span>
-              TEMPLATE
-            </span>
+            <small>
+              YOUR PHOTOS
+            </small>
 
             <h2>
-              {{ template.name }}
+              Foto yang sudah diambil
             </h2>
-
           </div>
 
-          <span class="template-category">
-            {{ template.category }}
+          <span>
+            {{ photos.length }}/{{ totalPhotos }}
           </span>
 
         </div>
 
 
-        <!-- TEMPLATE PREVIEW -->
+        <div class="photo-grid">
 
-        <div
-          class="template-preview"
-          :style="{
-            background:
-              `linear-gradient(145deg,
-              ${template.colors[0]},
-              ${template.colors[1]})`
-          }"
-        >
+          <div
+            v-for="(
+              photo,
+              index
+            ) in photos"
+            :key="index"
+            class="photo-item"
+          >
 
-          <div class="preview-title">
-
-            {{ template.name }}
-
-          </div>
-
-
-          <div class="preview-photos">
-
-            <div
-              v-for="n in 4"
-              :key="n"
-              class="preview-photo"
-              :class="{
-                taken:
-                  photos[n - 1]
-              }"
+            <img
+              :src="photo"
+              :alt="`Foto ${index + 1}`"
             >
 
-              <img
-                v-if="photos[n - 1]"
-                :src="photos[n - 1]"
-                alt="Photo"
-              >
-
-              <span v-else>
-                {{ n }}
-              </span>
-
+            <div class="photo-label">
+              PHOTO {{ index + 1 }}
             </div>
 
           </div>
 
-
-          <div class="preview-footer">
-
-            ✦ memories ✦
-
-          </div>
-
         </div>
 
 
-        <!-- PHOTO STATUS -->
+        <!-- GO RESULT -->
 
-        <div class="photo-status">
+        <button
+          v-if="
+            photos.length === totalPhotos
+          "
+          class="result-button"
+          @click="goToResult"
+        >
+          ✨ Lihat Hasil Photobooth
+        </button>
 
-          <div
-            v-for="n in 4"
-            :key="n"
-            class="status-item"
-            :class="{
-              done:
-                photos[n - 1],
-              current:
-                currentPhoto === n &&
-                !isFinished
-            }"
-          >
+      </section>
 
-            <span>
 
-              {{
-                photos[n - 1]
-                  ? '✓'
-                  : n
-              }}
+      <!-- ======================================= -->
+      <!-- TEMPLATE INFO -->
+      <!-- ======================================= -->
 
-            </span>
+      <section class="template-info">
 
-            <small>
-              Photo {{ n }}
-            </small>
+        <div class="template-icon">
+          ✨
+        </div>
 
-          </div>
+        <div>
+
+          <small>
+            TEMPLATE
+          </small>
+
+          <h3>
+            {{ template.name }}
+          </h3>
+
+          <p>
+            {{ template.subtitle }}
+          </p>
 
         </div>
 
-      </aside>
+      </section>
 
     </main>
 
 
-    <canvas
-      ref="canvas"
-      class="hidden-canvas"
-    />
+    <!-- ========================================= -->
+    <!-- FOOTER -->
+    <!-- ========================================= -->
+
+    <footer>
+      Made with 📸 for beautiful memories
+    </footer>
 
   </div>
-
 </template>
 
 
 <style scoped>
 
+/* =====================================================
+   RESET
+===================================================== */
+
 * {
   box-sizing: border-box;
 }
 
+
+/* =====================================================
+   PAGE
+===================================================== */
+
 .camera-page {
+
   min-height: 100vh;
 
   background:
-    #fafafa;
+    linear-gradient(
+      180deg,
+      #ffffff 0%,
+      #fafafa 100%
+    );
 
-  color:
-    #18181b;
+  color: #18181b;
 
   font-family:
     Inter,
-    ui-sans-serif,
-    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
     sans-serif;
+
 }
 
 
-/* HEADER */
+/* =====================================================
+   HEADER
+===================================================== */
 
 .camera-header {
 
-  height: 72px;
+  height: 76px;
+
+  display: flex;
+
+  align-items: center;
+
+  justify-content: space-between;
 
   padding:
     0 5%;
-
-  display:
-    flex;
-
-  align-items:
-    center;
-
-  justify-content:
-    space-between;
 
   background:
     rgba(255,255,255,.94);
@@ -683,8 +883,7 @@ onBeforeUnmount(() => {
   border-bottom:
     1px solid #e4e4e7;
 
-  position:
-    sticky;
+  position: sticky;
 
   top: 0;
 
@@ -692,6 +891,7 @@ onBeforeUnmount(() => {
 
   backdrop-filter:
     blur(15px);
+
 }
 
 .back-button {
@@ -708,38 +908,100 @@ onBeforeUnmount(() => {
 
   color: #52525b;
 
+  font-size: 14px;
+
   font-weight: 700;
 
   cursor: pointer;
+
 }
 
-.back-button:hover {
-  color: #7c3aed;
+.back-icon {
+
+  font-size: 24px;
+
 }
 
-.header-title {
+.brand {
 
   display: flex;
 
   align-items: center;
 
   gap: 9px;
+
+  font-size: 18px;
+
+  font-weight: 900;
+
 }
 
-.header-title span {
-  font-size: 20px;
+.brand-camera {
+
+  font-size: 23px;
+
 }
 
-.photo-progress {
+.progress {
+
+  min-width: 54px;
 
   padding:
-    7px 12px;
+    9px 13px;
 
-  border-radius:
-    999px;
+  border-radius: 999px;
 
   background:
     #f3e8ff;
+
+  color:
+    #7c3aed;
+
+  text-align: center;
+
+  font-weight: 900;
+
+}
+
+
+/* =====================================================
+   MAIN
+===================================================== */
+
+.camera-main {
+
+  width: 92%;
+
+  max-width: 1050px;
+
+  margin: auto;
+
+  padding:
+    45px 0 70px;
+
+  display: grid;
+
+  grid-template-columns:
+    340px 1fr;
+
+  gap: 35px;
+
+  align-items: start;
+
+}
+
+
+/* =====================================================
+   INSTRUCTION
+===================================================== */
+
+.instruction {
+
+  padding-top: 30px;
+
+}
+
+.photo-number {
 
   color:
     #7c3aed;
@@ -748,75 +1010,30 @@ onBeforeUnmount(() => {
     12px;
 
   font-weight:
-    800;
-}
-
-
-/* MAIN */
-
-.camera-main {
-
-  width:
-    92%;
-
-  max-width:
-    1150px;
-
-  margin:
-    auto;
-
-  padding:
-    45px 0 70px;
-
-  display:
-    grid;
-
-  grid-template-columns:
-    1.3fr .7fr;
-
-  gap:
-    40px;
-
-  align-items:
-    start;
-}
-
-
-/* INSTRUCTION */
-
-.instruction {
-  margin-bottom:
-    20px;
-}
-
-.small-label {
-
-  color:
-    #7c3aed;
-
-  font-size:
-    11px;
-
-  font-weight:
     900;
 
   letter-spacing:
-    2px;
+    3px;
+
+  margin-bottom:
+    12px;
+
 }
 
 .instruction h1 {
 
   margin:
-    6px 0;
+    0 0 12px;
 
   font-size:
-    36px;
+    42px;
 
-  font-weight:
-    900;
+  line-height:
+    1.05;
 
   letter-spacing:
     -1.5px;
+
 }
 
 .instruction p {
@@ -826,212 +1043,180 @@ onBeforeUnmount(() => {
 
   color:
     #71717a;
+
+  font-size:
+    18px;
+
+  line-height:
+    1.55;
+
 }
 
 
-/* CAMERA */
+/* =====================================================
+   CAMERA SECTION
+===================================================== */
+
+.camera-section {
+
+  width: 100%;
+
+}
+
+.camera-card {
+
+  width: 100%;
+
+}
 
 .camera-wrapper {
 
-  position:
-    relative;
-
-  width:
-    100%;
+  width: 100%;
 
   aspect-ratio:
-    16 / 10;
+    4 / 3;
 
-  overflow:
-    hidden;
+  position: relative;
+
+  overflow: hidden;
 
   border-radius:
-    20px;
+    24px;
 
   background:
     #18181b;
 
   box-shadow:
-    0 20px 50px
-    rgba(0,0,0,.18);
+    0 25px 70px
+    rgba(0,0,0,.16);
+
 }
 
 .camera-video {
 
-  width:
-    100%;
+  width: 100%;
 
-  height:
-    100%;
+  height: 100%;
 
-  object-fit:
-    cover;
+  display: block;
 
-  transform:
-    scaleX(-1);
-}
-
-
-/* COUNTDOWN */
-
-.countdown {
-
-  position:
-    absolute;
-
-  inset:
-    0;
-
-  display:
-    grid;
-
-  place-items:
-    center;
-
-  color:
-    white;
-
-  font-size:
-    clamp(100px, 15vw, 180px);
-
-  font-weight:
-    1000;
-
-  text-shadow:
-    0 5px 30px
-    rgba(0,0,0,.5);
-}
-
-
-/* ERROR */
-
-.camera-error {
-
-  position:
-    absolute;
-
-  inset:
-    0;
-
-  display:
-    flex;
-
-  flex-direction:
-    column;
-
-  align-items:
-    center;
-
-  justify-content:
-    center;
-
-  text-align:
-    center;
-
-  padding:
-    30px;
-
-  color:
-    white;
+  object-fit: cover;
 
   background:
     #18181b;
+
 }
 
-.error-icon {
-  font-size: 50px;
-}
 
-.camera-error h3 {
-  margin:
-    10px 0 5px;
-}
+/* =====================================================
+   CAMERA START
+===================================================== */
 
-.camera-error p {
+.camera-start {
 
-  max-width:
-    400px;
+  position: absolute;
 
-  color:
-    #a1a1aa;
+  inset: 0;
 
-  font-size:
-    13px;
+  z-index: 5;
 
-  line-height:
-    1.5;
-}
+  display: flex;
 
-.retry-button {
+  flex-direction: column;
 
-  padding:
-    10px 18px;
+  align-items: center;
 
-  border:
-    none;
+  justify-content: center;
 
-  border-radius:
-    10px;
+  padding: 25px;
+
+  text-align: center;
 
   background:
-    #7c3aed;
+    radial-gradient(
+      circle at top,
+      #29292f,
+      #111114
+    );
 
-  color:
-    white;
+  color: white;
 
-  font-weight:
-    700;
-
-  cursor:
-    pointer;
 }
 
+.camera-start-icon {
 
-/* CONTROLS */
+  width: 82px;
 
-.controls {
+  height: 82px;
 
-  display:
-    flex;
+  display: grid;
 
-  justify-content:
-    center;
+  place-items: center;
 
-  margin:
-    25px 0;
-}
-
-.capture-button {
-
-  min-width:
-    210px;
-
-  padding:
-    14px 24px;
-
-  border:
-    none;
-
-  border-radius:
-    14px;
-
-  display:
-    flex;
-
-  align-items:
-    center;
-
-  justify-content:
-    center;
-
-  gap:
-    10px;
+  border-radius: 50%;
 
   background:
     linear-gradient(
       135deg,
       #7c3aed,
-      #c026d3
+      #db2777
+    );
+
+  font-size: 34px;
+
+  margin-bottom: 18px;
+
+  box-shadow:
+    0 15px 35px
+    rgba(124,58,237,.35);
+
+}
+
+.camera-start h2 {
+
+  margin:
+    0 0 8px;
+
+  font-size:
+    24px;
+
+}
+
+.camera-start p {
+
+  max-width:
+    300px;
+
+  margin:
+    0 0 22px;
+
+  color:
+    #a1a1aa;
+
+  line-height:
+    1.5;
+
+  font-size:
+    14px;
+
+}
+
+.start-camera-button {
+
+  border:
+    none;
+
+  padding:
+    15px 27px;
+
+  border-radius:
+    14px;
+
+  background:
+    linear-gradient(
+      135deg,
+      #7c3aed,
+      #db2777
     );
 
   color:
@@ -1041,20 +1226,322 @@ onBeforeUnmount(() => {
     15px;
 
   font-weight:
-    800;
-
-  box-shadow:
-    0 10px 25px
-    rgba(124,58,237,.28);
+    900;
 
   cursor:
     pointer;
 
-  transition:
-    .2s;
+  box-shadow:
+    0 12px 30px
+    rgba(124,58,237,.35);
+
 }
 
-.capture-button:hover:not(:disabled) {
+.error-icon {
+
+  background:
+    linear-gradient(
+      135deg,
+      #ef4444,
+      #f97316
+    );
+
+}
+
+
+/* =====================================================
+   SPINNER
+===================================================== */
+
+.spinner {
+
+  width: 55px;
+
+  height: 55px;
+
+  border:
+    4px solid
+    rgba(255,255,255,.2);
+
+  border-top-color:
+    white;
+
+  border-radius:
+    50%;
+
+  animation:
+    spin .8s linear infinite;
+
+  margin-bottom:
+    20px;
+
+}
+
+@keyframes spin {
+
+  to {
+    transform:
+      rotate(360deg);
+  }
+
+}
+
+
+/* =====================================================
+   COUNTDOWN
+===================================================== */
+
+.countdown {
+
+  position: absolute;
+
+  inset: 0;
+
+  z-index: 10;
+
+  display: grid;
+
+  place-items: center;
+
+  color: white;
+
+  font-size:
+    clamp(100px, 18vw, 190px);
+
+  font-weight:
+    1000;
+
+  text-shadow:
+    0 10px 40px
+    rgba(0,0,0,.5);
+
+  background:
+    rgba(0,0,0,.15);
+
+}
+
+.countdown-enter-active,
+.countdown-leave-active {
+
+  transition:
+    .2s;
+
+}
+
+.countdown-enter-from,
+.countdown-leave-to {
+
+  opacity:
+    0;
+
+  transform:
+    scale(1.3);
+
+}
+
+
+/* =====================================================
+   FLASH
+===================================================== */
+
+.flash {
+
+  position:
+    absolute;
+
+  inset:
+    0;
+
+  z-index:
+    15;
+
+  background:
+    white;
+
+  pointer-events:
+    none;
+
+}
+
+.flash-enter-active,
+.flash-leave-active {
+
+  transition:
+    .18s;
+
+}
+
+.flash-enter-from,
+.flash-leave-to {
+
+  opacity:
+    0;
+
+}
+
+
+/* =====================================================
+   CAMERA CONTROLS
+===================================================== */
+
+.camera-controls {
+
+  position:
+    absolute;
+
+  top:
+    18px;
+
+  right:
+    18px;
+
+  z-index:
+    8;
+
+}
+
+.camera-control {
+
+  width:
+    48px;
+
+  height:
+    48px;
+
+  border:
+    1px solid
+    rgba(255,255,255,.25);
+
+  border-radius:
+    50%;
+
+  background:
+    rgba(0,0,0,.5);
+
+  color:
+    white;
+
+  font-size:
+    20px;
+
+  cursor:
+    pointer;
+
+  backdrop-filter:
+    blur(8px);
+
+}
+
+.camera-control:disabled {
+
+  opacity:
+    .5;
+
+}
+
+
+/* =====================================================
+   CAMERA COUNTER
+===================================================== */
+
+.camera-counter {
+
+  position:
+    absolute;
+
+  left:
+    50%;
+
+  bottom:
+    18px;
+
+  transform:
+    translateX(-50%);
+
+  z-index:
+    8;
+
+  padding:
+    8px 15px;
+
+  border-radius:
+    999px;
+
+  background:
+    rgba(0,0,0,.55);
+
+  color:
+    white;
+
+  font-size:
+    14px;
+
+  font-weight:
+    800;
+
+  backdrop-filter:
+    blur(8px);
+
+}
+
+.camera-counter span {
+
+  color:
+    #d8b4fe;
+
+}
+
+
+/* =====================================================
+   CAPTURE BUTTON
+===================================================== */
+
+.capture-button {
+
+  width:
+    100%;
+
+  margin-top:
+    18px;
+
+  padding:
+    17px;
+
+  border:
+    none;
+
+  border-radius:
+    16px;
+
+  background:
+    linear-gradient(
+      135deg,
+      #7c3aed,
+      #db2777
+    );
+
+  color:
+    white;
+
+  font-size:
+    17px;
+
+  font-weight:
+    900;
+
+  cursor:
+    pointer;
+
+  box-shadow:
+    0 12px 30px
+    rgba(124,58,237,.25);
+
+  transition:
+    .2s;
+
+}
+
+.capture-button:hover {
 
   transform:
     translateY(-2px);
@@ -1064,303 +1551,180 @@ onBeforeUnmount(() => {
 .capture-button:disabled {
 
   opacity:
-    .5;
+    .65;
 
   cursor:
-    not-allowed;
+    wait;
+
+  transform:
+    none;
+
 }
 
-.camera-icon {
-  font-size:
-    20px;
-}
 
-.finished-controls {
+/* =====================================================
+   RESET
+===================================================== */
+
+.reset-button {
 
   display:
-    flex;
+    block;
 
-  gap:
-    10px;
-}
-
-.secondary-button,
-.primary-button {
-
-  padding:
-    13px 20px;
-
-  border-radius:
-    12px;
-
-  font-weight:
-    800;
-
-  cursor:
-    pointer;
-}
-
-.secondary-button {
-
-  border:
-    1px solid #d4d4d8;
-
-  background:
-    white;
-
-  color:
-    #52525b;
-}
-
-.primary-button {
+  margin:
+    13px auto 0;
 
   border:
     none;
 
   background:
-    #7c3aed;
-
-  color:
-    white;
-}
-
-
-/* TIPS */
-
-.tips {
-
-  display:
-    flex;
-
-  gap:
-    12px;
-
-  padding:
-    15px;
-
-  border:
-    1px solid #e4e4e7;
-
-  border-radius:
-    13px;
-
-  background:
-    white;
-}
-
-.tips > span {
-  font-size:
-    20px;
-}
-
-.tips strong {
-  font-size:
-    13px;
-}
-
-.tips p {
-
-  margin:
-    3px 0 0;
+    transparent;
 
   color:
     #71717a;
 
   font-size:
-    12px;
+    13px;
 
-  line-height:
-    1.5;
+  font-weight:
+    700;
+
+  cursor:
+    pointer;
+
+}
+
+.reset-button:disabled {
+
+  opacity:
+    .5;
+
 }
 
 
-/* PREVIEW */
+/* =====================================================
+   PREVIEW
+===================================================== */
 
 .preview-section {
 
+  grid-column:
+    1 / -1;
+
+  margin-top:
+    15px;
+
   padding:
-    20px;
+    25px;
 
   border:
     1px solid #e4e4e7;
 
   border-radius:
-    18px;
+    22px;
 
   background:
     white;
 
-  box-shadow:
-    0 8px 30px
-    rgba(0,0,0,.05);
 }
 
-.preview-header {
+.preview-title {
 
   display:
     flex;
 
+  align-items:
+    center;
+
   justify-content:
     space-between;
 
-  align-items:
-    flex-start;
-
   margin-bottom:
-    15px;
+    18px;
+
 }
 
-.preview-header span:first-child {
-
-  color:
-    #a1a1aa;
-
-  font-size:
-    9px;
-
-  font-weight:
-    900;
-
-  letter-spacing:
-    1.5px;
-}
-
-.preview-header h2 {
-
-  margin:
-    3px 0 0;
-
-  font-size:
-    17px;
-}
-
-.template-category {
-
-  padding:
-    5px 9px;
-
-  border-radius:
-    999px;
-
-  background:
-    #f3e8ff;
+.preview-title small {
 
   color:
     #7c3aed;
 
   font-size:
-    9px;
-
-  font-weight:
-    800;
-}
-
-
-/* TEMPLATE */
-
-.template-preview {
-
-  aspect-ratio:
-    .72;
-
-  max-height:
-    570px;
-
-  margin:
-    auto;
-
-  padding:
-    25px 18px;
-
-  border-radius:
     10px;
-
-  display:
-    flex;
-
-  flex-direction:
-    column;
-
-  align-items:
-    center;
-
-  box-shadow:
-    inset 0 0 0 2px
-    rgba(255,255,255,.7);
-}
-
-.preview-title {
-
-  margin-bottom:
-    12px;
-
-  color:
-    #be185d;
-
-  font-family:
-    Georgia,
-    serif;
-
-  font-size:
-    20px;
 
   font-weight:
     900;
+
+  letter-spacing:
+    2px;
+
 }
 
-.preview-photos {
+.preview-title h2 {
 
-  width:
-    90%;
+  margin:
+    5px 0 0;
 
-  flex:
-    1;
+  font-size:
+    21px;
+
+}
+
+.preview-title > span {
+
+  padding:
+    8px 12px;
+
+  border-radius:
+    999px;
+
+  background:
+    #f4f4f5;
+
+  color:
+    #52525b;
+
+  font-size:
+    13px;
+
+  font-weight:
+    800;
+
+}
+
+.photo-grid {
 
   display:
     grid;
 
   grid-template-columns:
-    1fr 1fr;
+    repeat(4, 1fr);
 
   gap:
-    7px;
+    12px;
+
 }
 
-.preview-photo {
+.photo-item {
 
-  min-height:
-    60px;
+  position:
+    relative;
+
+  aspect-ratio:
+    4 / 3;
 
   overflow:
     hidden;
 
-  border:
-    2px solid
-    rgba(255,255,255,.9);
-
   border-radius:
-    5px;
-
-  display:
-    grid;
-
-  place-items:
-    center;
-
-  background:
-    rgba(255,255,255,.45);
-
-  color:
-    rgba(190,24,93,.5);
-
-  font-size:
     12px;
 
-  font-weight:
-    800;
+  background:
+    #f4f4f5;
+
 }
 
-.preview-photo img {
+.photo-item img {
 
   width:
     100%;
@@ -1370,63 +1734,117 @@ onBeforeUnmount(() => {
 
   object-fit:
     cover;
+
+  display:
+    block;
+
 }
 
-.preview-footer {
+.photo-label {
 
-  margin-top:
-    10px;
+  position:
+    absolute;
+
+  left:
+    8px;
+
+  bottom:
+    8px;
+
+  padding:
+    5px 8px;
+
+  border-radius:
+    6px;
+
+  background:
+    rgba(0,0,0,.6);
 
   color:
-    #be185d;
+    white;
 
   font-size:
     9px;
+
+  font-weight:
+    900;
+
 }
 
+.result-button {
 
-/* STATUS */
-
-.photo-status {
-
-  display:
-    grid;
-
-  grid-template-columns:
-    repeat(4,1fr);
-
-  gap:
-    6px;
+  width:
+    100%;
 
   margin-top:
+    18px;
+
+  padding:
+    16px;
+
+  border:
+    none;
+
+  border-radius:
+    14px;
+
+  background:
+    #18181b;
+
+  color:
+    white;
+
+  font-size:
     15px;
+
+  font-weight:
+    900;
+
+  cursor:
+    pointer;
+
 }
 
-.status-item {
+
+/* =====================================================
+   TEMPLATE INFO
+===================================================== */
+
+.template-info {
+
+  grid-column:
+    1 / -1;
 
   display:
     flex;
-
-  flex-direction:
-    column;
 
   align-items:
     center;
 
   gap:
-    4px;
+    15px;
 
-  color:
-    #a1a1aa;
+  padding:
+    18px;
+
+  border-radius:
+    18px;
+
+  background:
+    #fafafa;
+
+  border:
+    1px solid #e4e4e7;
+
 }
 
-.status-item span {
+.template-icon {
 
   width:
-    27px;
+    50px;
 
   height:
-    27px;
+    50px;
 
   display:
     grid;
@@ -1434,89 +1852,109 @@ onBeforeUnmount(() => {
   place-items:
     center;
 
-  border:
-    1px solid #e4e4e7;
-
   border-radius:
-    50%;
-
-  font-size:
-    10px;
-
-  font-weight:
-    800;
-}
-
-.status-item small {
-  font-size:
-    8px;
-}
-
-.status-item.current span {
-
-  border-color:
-    #7c3aed;
-
-  color:
-    #7c3aed;
+    14px;
 
   background:
     #f3e8ff;
+
+  font-size:
+    23px;
+
 }
 
-.status-item.done span {
-
-  border-color:
-    #22c55e;
-
-  background:
-    #22c55e;
+.template-info small {
 
   color:
-    white;
+    #71717a;
+
+  font-size:
+    9px;
+
+  font-weight:
+    900;
+
+  letter-spacing:
+    2px;
+
 }
 
+.template-info h3 {
 
-/* HIDDEN CANVAS */
+  margin:
+    3px 0;
 
-.hidden-canvas {
-  display:
-    none;
+  font-size:
+    16px;
+
 }
 
+.template-info p {
 
-/* TRANSITION */
-
-.countdown-enter-active,
-.countdown-leave-active {
-  transition:
-    .2s;
-}
-
-.countdown-enter-from,
-.countdown-leave-to {
-  opacity:
+  margin:
     0;
 
-  transform:
-    scale(1.3);
+  color:
+    #71717a;
+
+  font-size:
+    12px;
+
 }
 
 
-/* MOBILE */
+/* =====================================================
+   FOOTER
+===================================================== */
+
+footer {
+
+  padding:
+    25px;
+
+  text-align:
+    center;
+
+  color:
+    #a1a1aa;
+
+  font-size:
+    12px;
+
+  border-top:
+    1px solid #e4e4e7;
+
+}
+
+
+/* =====================================================
+   MOBILE
+===================================================== */
 
 @media (max-width: 800px) {
 
   .camera-header {
+
+    height:
+      68px;
 
     padding:
       0 4%;
 
   }
 
-  .back-button span {
+  .brand {
+
+    font-size:
+      16px;
+
+  }
+
+  .back-button span:not(.back-icon) {
+
     display:
       none;
+
   }
 
   .camera-main {
@@ -1524,19 +1962,42 @@ onBeforeUnmount(() => {
     width:
       94%;
 
-    grid-template-columns:
-      1fr;
+    display:
+      flex;
+
+    flex-direction:
+      column;
 
     padding:
-      25px 0 50px;
+      25px 0 45px;
 
     gap:
-      25px;
+      22px;
+
+  }
+
+  .instruction {
+
+    padding-top:
+      0;
+
+    width:
+      100%;
+
   }
 
   .instruction h1 {
+
     font-size:
-      30px;
+      31px;
+
+  }
+
+  .instruction p {
+
+    font-size:
+      15px;
+
   }
 
   .camera-wrapper {
@@ -1545,22 +2006,97 @@ onBeforeUnmount(() => {
       3 / 4;
 
     border-radius:
-      16px;
+      20px;
+
+  }
+
+  .camera-video {
+
+    object-fit:
+      cover;
+
   }
 
   .preview-section {
 
-    order:
-      2;
+    width:
+      100%;
+
+    padding:
+      18px;
+
   }
 
-  .template-preview {
+  .photo-grid {
 
-    max-height:
-      500px;
+    grid-template-columns:
+      repeat(2, 1fr);
+
+  }
+
+  .template-info {
+
+    width:
+      100%;
 
   }
 
 }
 
+
+/* =====================================================
+   SMALL PHONE
+===================================================== */
+
+@media (max-width: 420px) {
+
+  .camera-header {
+
+    padding:
+      0 15px;
+
+  }
+
+  .brand {
+
+    font-size:
+      14px;
+
+  }
+
+  .brand-camera {
+
+    font-size:
+      18px;
+
+  }
+
+  .progress {
+
+    min-width:
+      48px;
+
+    padding:
+      8px 10px;
+
+    font-size:
+      12px;
+
+  }
+
+  .instruction h1 {
+
+    font-size:
+      28px;
+
+  }
+
+  .camera-wrapper {
+
+    aspect-ratio:
+      3 / 4;
+
+  }
+
+}
 </style>
