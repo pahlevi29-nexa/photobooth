@@ -1,212 +1,2329 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, nextTick } from 'vue'
+import { ref, onMounted } from 'vue'
 import { templates } from '~/data/templates'
 
 const route = useRoute()
-const templateId = computed(() => Number(route.query.template || 1))
-const template = computed(() => templates.find(t => t.id === templateId.value) || templates[0])
+
+const templateId = Number(route.query.template || 1)
+
+const template =
+  templates.find(t => t.id === templateId) ||
+  templates[0]
 
 const photos = ref<string[]>([])
 const resultUrl = ref('')
 const loading = ref(true)
-const errorMessage = ref('')
 const canvas = ref<HTMLCanvasElement | null>(null)
 
-const photoCount = computed(() => {
-  const n = Number(template.value?.photos ?? 4)
-  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 4
-})
+/* =====================================================
+   LOAD DATA
+===================================================== */
 
-const title = computed(() => template.value?.name || 'PhotoBooth')
-const subtitle = computed(() => {
-  const map: Record<string, string> = {
-    love: '♡ memories ♡', kawaii: 'Captured moments', film: 'FILM MEMORIES', polaroid: 'classic memories',
-    friends: 'best moments together', coquette: 'pretty little moments', magazine: 'SPECIAL EDITION', luxury: 'SPECIAL MOMENTS',
-    blue: 'GOOD VIBES', purple: 'MIDNIGHT MEMORIES', retro: 'memories / 2026', flower: 'blooming memories',
-    minimal: 'simple memories', letter: 'with love', y2k: 'GOOD TIMES', bear: 'sweet memories', newspaper: 'THE PHOTO ISSUE',
-    red: 'made with love', ocean: 'good vibes only', green: 'soft moments', diary: 'dear diary', street: 'CITY MEMORIES',
-    wedding: 'forever starts here', vertical: '♡ memories ♡'
+onMounted(async () => {
+  const saved = localStorage.getItem('photobooth_photos')
+
+  if (saved) {
+    try {
+      const parsed = JSON.parse(saved)
+
+      if (Array.isArray(parsed)) {
+        photos.value = parsed
+      }
+    } catch {
+      photos.value = []
+    }
   }
-  return map[template.value?.style || ''] || 'Captured moments'
+
+  /*
+   * PENTING:
+   * hanya gunakan jumlah foto sesuai template
+   */
+  photos.value = photos.value.slice(0, template.photos)
+
+  if (photos.value.length === template.photos) {
+    await generate()
+  } else {
+    loading.value = false
+  }
 })
 
-const loadImage = (src: string) => new Promise<HTMLImageElement>((resolve, reject) => {
-  const img = new Image()
-  img.onload = () => resolve(img)
-  img.onerror = () => reject(new Error('Gagal memuat foto'))
-  img.src = src
-})
+/* =====================================================
+   LOAD IMAGE
+===================================================== */
 
-const roundedRect = (ctx: CanvasRenderingContext2D, x:number,y:number,w:number,h:number,r:number) => {
-  const rr = Math.min(r, w/2, h/2)
-  ctx.beginPath(); ctx.moveTo(x+rr,y); ctx.lineTo(x+w-rr,y)
-  ctx.quadraticCurveTo(x+w,y,x+w,y+rr); ctx.lineTo(x+w,y+h-rr)
-  ctx.quadraticCurveTo(x+w,y+h,x+w-rr,y+h); ctx.lineTo(x+rr,y+h)
-  ctx.quadraticCurveTo(x,y+h,x,y+h-rr); ctx.lineTo(x,y+rr)
-  ctx.quadraticCurveTo(x,y,x+rr,y); ctx.closePath()
-}
+const loadImage = (src: string) => {
+  return new Promise<HTMLImageElement>((resolve, reject) => {
+    const img = new Image()
 
-const contain = (ctx:CanvasRenderingContext2D,img:HTMLImageElement,x:number,y:number,w:number,h:number,r=0,bg='#fff') => {
-  const ratio = img.width/img.height, box = w/h
-  let dw=w, dh=h
-  if (ratio > box) dh=w/ratio; else dw=h*ratio
-  const dx=x+(w-dw)/2, dy=y+(h-dh)/2
-  ctx.save(); if(r){roundedRect(ctx,x,y,w,h,r);ctx.clip()}
-  ctx.fillStyle=bg; ctx.fillRect(x,y,w,h); ctx.drawImage(img,dx,dy,dw,dh); ctx.restore()
-}
+    img.onload = () => resolve(img)
+    img.onerror = reject
 
-const cover = (ctx:CanvasRenderingContext2D,img:HTMLImageElement,x:number,y:number,w:number,h:number,r=0) => {
-  const ratio=img.width/img.height, box=w/h
-  let sx=0,sy=0,sw=img.width,sh=img.height
-  if(ratio>box){sw=img.height*box;sx=(img.width-sw)/2}else{sh=img.width/box;sy=(img.height-sh)*0.18}
-  ctx.save(); if(r){roundedRect(ctx,x,y,w,h,r);ctx.clip()}
-  ctx.drawImage(img,sx,sy,sw,sh,x,y,w,h); ctx.restore()
-}
-
-const text = (ctx:CanvasRenderingContext2D,v:string,x:number,y:number,size:number,color:string,weight='700',font='Arial',align:CanvasTextAlign='center') => {
-  ctx.fillStyle=color; ctx.font=`${weight} ${size}px ${font}`; ctx.textAlign=align; ctx.textBaseline='middle'; ctx.fillText(v,x,y)
-}
-
-const bg = (ctx:CanvasRenderingContext2D,W:number,H:number) => {
-  const c=template.value?.colors || ['#fdf2f8','#fbcfe8']
-  const g=ctx.createLinearGradient(0,0,W,H); g.addColorStop(0,c[0]);g.addColorStop(1,c[1]);ctx.fillStyle=g;ctx.fillRect(0,0,W,H)
-}
-
-const frame = (ctx:CanvasRenderingContext2D,img:HTMLImageElement,x:number,y:number,w:number,h:number,r=22,mode:'cover'|'contain'='cover') => {
-  ctx.save(); ctx.shadowColor='rgba(0,0,0,.14)';ctx.shadowBlur=20;ctx.shadowOffsetY=8;ctx.fillStyle='#fff';roundedRect(ctx,x-10,y-10,w+20,h+20,r+5);ctx.fill();ctx.restore()
-  mode==='contain' ? contain(ctx,img,x,y,w,h,r) : cover(ctx,img,x,y,w,h,r)
-}
-
-// 2x2 = same structure shown by Kawaii/Sweet Love/Luxury/Blue/etc. in the template picker.
-const layoutTwoByTwo = (ctx:CanvasRenderingContext2D, images:HTMLImageElement[], W:number, H:number) => {
-  const c=template.value.colors
-  text(ctx,title.value,W/2,105,58,c?.[1] || '#831843','700','Georgia')
-  text(ctx,subtitle.value,W/2,150,22,c?.[1] || '#9d174d','400')
-  const gap=46, w=500, h=620, startX=(W-(w*2+gap))/2, startY=230
-  images.slice(0,4).forEach((img,i)=>{
-    const col=i%2,row=Math.floor(i/2),x=startX+col*(w+gap),y=startY+row*(h+gap)
-    frame(ctx,img,x,y,w,h,28,'cover')
-    text(ctx,String(i+1).padStart(2,'0'),x+w/2,y+h+30,17,c?.[1] || '#831843','700')
+    img.src = src
   })
-  text(ctx,'♡ memories ♡',W/2,H-65,25,c?.[1] || '#be185d','700','cursive')
 }
 
-// Film/retro preview is one vertical strip with 4 frames.
-const layoutFilm = (ctx:CanvasRenderingContext2D,images:HTMLImageElement[],W:number,H:number) => {
-  ctx.fillStyle='#171717';roundedRect(ctx,55,45,W-110,H-90,18);ctx.fill()
-  text(ctx,title.value,W/2,105,52,'#fff','700','Georgia');text(ctx,subtitle.value,W/2,145,18,'#ddd','400')
-  const x=150,w=900,h=310,gap=72,startY=195
-  images.slice(0,4).forEach((img,i)=>{const y=startY+i*(h+gap);ctx.fillStyle='#fff';ctx.fillRect(x-14,y-14,w+28,h+28);cover(ctx,img,x,y,w,h,2);text(ctx,`FRAME ${i+1}`,W/2,y+h+37,15,'#222','700')})
-  text(ctx,'FILM • 2026',W/2,H-50,18,'#fff','700')
+/* =====================================================
+   BACKGROUND
+===================================================== */
+
+const drawBackground = (
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number
+) => {
+  const gradient = ctx.createLinearGradient(
+    0,
+    0,
+    width,
+    height
+  )
+
+  gradient.addColorStop(
+    0,
+    template.colors[0]
+  )
+
+  gradient.addColorStop(
+    1,
+    template.colors[1]
+  )
+
+  ctx.fillStyle = gradient
+
+  ctx.fillRect(
+    0,
+    0,
+    width,
+    height
+  )
 }
 
-// Polaroid preview is explicitly 3 cards vertically.
-const layoutPolaroid = (ctx:CanvasRenderingContext2D,images:HTMLImageElement[],W:number,H:number) => {
-  text(ctx,title.value,W/2,90,55,'#222','700','Georgia');text(ctx,subtitle.value,W/2,130,18,'#666','400')
-  const x=150,w=900,h=430,startY=190,gap=95
-  images.slice(0,3).forEach((img,i)=>{const y=startY+i*(h+gap);ctx.save();ctx.translate(W/2,y+h/2);ctx.rotate((i===1?1.3:-1.3)*Math.PI/180);ctx.shadowColor='rgba(0,0,0,.15)';ctx.shadowBlur=18;ctx.shadowOffsetY=8;ctx.fillStyle='#fff';ctx.fillRect(-w/2,-h/2,w,h);ctx.restore();contain(ctx,img,x,y,w,330,4,'#ddd');text(ctx,`memory ${i+1}`,W/2,y+375,19,'#444','400','cursive')})
+/* =====================================================
+   COVER IMAGE
+===================================================== */
+
+const drawCover = (
+  ctx: CanvasRenderingContext2D,
+  img: HTMLImageElement,
+  x: number,
+  y: number,
+  width: number,
+  height: number
+) => {
+  const imageRatio =
+    img.width / img.height
+
+  const boxRatio =
+    width / height
+
+  let sx = 0
+  let sy = 0
+  let sw = img.width
+  let sh = img.height
+
+  if (imageRatio > boxRatio) {
+    sw = img.height * boxRatio
+
+    sx =
+      (img.width - sw) / 2
+  } else {
+    sh = img.width / boxRatio
+
+    sy =
+      (img.height - sh) / 2
+  }
+
+  ctx.drawImage(
+    img,
+    sx,
+    sy,
+    sw,
+    sh,
+    x,
+    y,
+    width,
+    height
+  )
 }
 
-// Magazine/newspaper/street preview: one large photo + remaining small photos.
-const layoutEditorial = (ctx:CanvasRenderingContext2D,images:HTMLImageElement[],W:number,H:number) => {
-  ctx.fillStyle=template.value.style==='newspaper'?'#f5f5f4':'#18181b';ctx.fillRect(55,45,W-110,H-90)
-  const dark=template.value.style!=='newspaper'; const fg=dark?'#fff':'#222'
-  text(ctx,title.value.toUpperCase(),W/2,105,48,fg,'700','Georgia');text(ctx,subtitle.value,W/2,145,18,fg,'400')
-  if(images[0]) cover(ctx,images[0],105,205,990,650,8)
-  const count=images.length
-  const smallW=count===3?480:315, gap=30
-  const total=smallW*count+(count-1)*gap
-  const sx=(W-total)/2
-  images.slice(1).forEach((img,i)=>{cover(ctx,img,sx+i*(smallW+gap),900,smallW,560,8);text(ctx,String(i+2).padStart(2,'0'),sx+i*(smallW+gap)+smallW/2,1490,17,fg,'700')})
-  text(ctx,'SPECIAL EDITION',W/2,H-60,18,fg,'700')
+/* =====================================================
+   ROUNDED RECT
+===================================================== */
+
+const roundedRect = (
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  radius: number
+) => {
+  ctx.beginPath()
+
+  ctx.roundRect(
+    x,
+    y,
+    width,
+    height,
+    radius
+  )
 }
 
-const layoutMinimal = (ctx:CanvasRenderingContext2D,images:HTMLImageElement[],W:number,H:number) => {
-  text(ctx,title.value.toUpperCase(),W/2,100,48,'#18181b','400','Arial');text(ctx,subtitle.value,W/2,140,18,'#666','400')
-  const gap=30,w=500,h=650,sx=(W-(w*2+gap))/2,sy=220
-  images.slice(0,4).forEach((img,i)=>{const x=sx+(i%2)*(w+gap),y=sy+Math.floor(i/2)*(h+gap);cover(ctx,img,x,y,w,h,4);text(ctx,String(i+1).padStart(2,'0'),x+w/2,y+h+20,15,'#555','700')})
-  text(ctx,'PHOTOBOOTH',W/2,H-55,16,'#555','700')
+/* =====================================================
+   TEXT
+===================================================== */
+
+const drawText = (
+  ctx: CanvasRenderingContext2D,
+  value: string,
+  x: number,
+  y: number,
+  size: number,
+  color: string,
+  weight = 'bold',
+  font = 'Arial'
+) => {
+  ctx.fillStyle = color
+
+  ctx.font =
+    `${weight} ${size}px ${font}`
+
+  ctx.textAlign = 'center'
+
+  ctx.textBaseline = 'middle'
+
+  ctx.fillText(
+    value,
+    x,
+    y
+  )
 }
 
-const layoutCute = (ctx:CanvasRenderingContext2D,images:HTMLImageElement[],W:number,H:number) => {
-  text(ctx,'♡',W/2,70,55,'#db2777');text(ctx,title.value,W/2,125,52,'#db2777','700','cursive')
-  const gap=40,w=500,h=620,sx=(W-(w*2+gap))/2,sy=200
-  images.slice(0,4).forEach((img,i)=>{const x=sx+(i%2)*(w+gap),y=sy+Math.floor(i/2)*(h+gap);frame(ctx,img,x,y,w,h,38,'cover')})
-  text(ctx,subtitle.value,W/2,H-55,25,'#be185d','700','cursive')
+/* =====================================================
+   IMAGE WITH ROUNDED CORNERS
+===================================================== */
+
+const drawRoundedImage = (
+  ctx: CanvasRenderingContext2D,
+  img: HTMLImageElement,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  radius = 25
+) => {
+  ctx.save()
+
+  roundedRect(
+    ctx,
+    x,
+    y,
+    width,
+    height,
+    radius
+  )
+
+  ctx.clip()
+
+  drawCover(
+    ctx,
+    img,
+    x,
+    y,
+    width,
+    height
+  )
+
+  ctx.restore()
 }
 
-const layoutLuxury = (ctx:CanvasRenderingContext2D,images:HTMLImageElement[],W:number,H:number) => {
-  ctx.fillStyle='#141414';ctx.fillRect(0,0,W,H);text(ctx,title.value.toUpperCase(),W/2,95,50,'#d4af37','700','Georgia');text(ctx,subtitle.value,W/2,140,18,'#fff','400')
-  const gap=35,w=515,h=650,sx=(W-(w*2+gap))/2,sy=210
-  images.slice(0,4).forEach((img,i)=>{const x=sx+(i%2)*(w+gap),y=sy+Math.floor(i/2)*(h+gap);cover(ctx,img,x,y,w,h,4);ctx.strokeStyle='#d4af37';ctx.lineWidth=5;ctx.strokeRect(x,y,w,h)})
-  text(ctx,'✦ SPECIAL MOMENTS ✦',W/2,H-50,18,'#d4af37','700')
-}
-
-const layoutDefault = (ctx:CanvasRenderingContext2D,images:HTMLImageElement[],W:number,H:number) => layoutTwoByTwo(ctx,images,W,H)
+/* =====================================================
+   GENERATE
+===================================================== */
 
 const generate = async () => {
-  if(!canvas.value) return
-  loading.value=true;errorMessage.value=''
-  try {
-    const loaded:HTMLImageElement[]=[]
-    // IMPORTANT: use exactly the amount configured by the selected template.
-    for(const src of photos.value.slice(0,photoCount.value)) { try { loaded.push(await loadImage(src)) } catch(e){ console.warn(e) } }
-    if(loaded.length!==photoCount.value){ throw new Error(`Foto tidak lengkap (${loaded.length}/${photoCount.value})`) }
-    await nextTick()
-    const ctx=canvas.value.getContext('2d');if(!ctx) throw new Error('Canvas tidak tersedia')
-    const W=1200,H=1800;canvas.value.width=W;canvas.value.height=H;ctx.clearRect(0,0,W,H);bg(ctx,W,H)
-    const style=template.value.style
-    if(['love','kawaii','friends','coquette','flower','letter','y2k','bear','red','ocean','blue','purple','green','diary','wedding','vertical'].includes(style)) layoutTwoByTwo(ctx,loaded,W,H)
-    else if(['film','retro'].includes(style)) layoutFilm(ctx,loaded,W,H)
-    else if(style==='polaroid') layoutPolaroid(ctx,loaded,W,H)
-    else if(['magazine','newspaper','street'].includes(style)) layoutEditorial(ctx,loaded,W,H)
-    else if(style==='minimal') layoutMinimal(ctx,loaded,W,H)
-    else if(style==='luxury') layoutLuxury(ctx,loaded,W,H)
-    else if(style==='cute') layoutCute(ctx,loaded,W,H)
-    else layoutDefault(ctx,loaded,W,H)
-    resultUrl.value=canvas.value.toDataURL('image/jpeg',0.95)
-  } catch(e) { console.error(e);errorMessage.value=e instanceof Error?e.message:'Gagal membuat hasil foto.' }
-  finally { loading.value=false }
+  if (!canvas.value) {
+    loading.value = false
+    return
+  }
+
+  loading.value = true
+
+  /*
+   * JUMLAH FOTO BENAR-BENAR MENGIKUTI TEMPLATE
+   */
+  const requiredPhotos =
+    template.photos
+
+  const selectedPhotos =
+    photos.value.slice(
+      0,
+      requiredPhotos
+    )
+
+  const images: HTMLImageElement[] = []
+
+  for (const photo of selectedPhotos) {
+    try {
+      const image =
+        await loadImage(photo)
+
+      images.push(image)
+    } catch {
+      console.warn(
+        'Gagal memuat foto'
+      )
+    }
+  }
+
+  /*
+   * Kalau jumlah foto belum lengkap,
+   * jangan membuat hasil palsu.
+   */
+  if (
+    images.length !==
+    requiredPhotos
+  ) {
+    loading.value = false
+    resultUrl.value = ''
+    return
+  }
+
+  const ctx =
+    canvas.value.getContext('2d')
+
+  if (!ctx) {
+    loading.value = false
+    return
+  }
+
+  /*
+   * CANVAS PORTRAIT
+   */
+  const W = 1200
+  const H = 1800
+
+  canvas.value.width = W
+  canvas.value.height = H
+
+  ctx.clearRect(
+    0,
+    0,
+    W,
+    H
+  )
+
+  /*
+   * BACKGROUND
+   */
+  drawBackground(
+    ctx,
+    W,
+    H
+  )
+
+  /* =================================================
+     LOVE
+  ================================================= */
+
+  if (template.style === 'love') {
+
+    drawText(
+      ctx,
+      '♡',
+      600,
+      80,
+      55,
+      '#db2777'
+    )
+
+    drawText(
+      ctx,
+      template.name,
+      600,
+      145,
+      58,
+      '#9d174d',
+      'bold',
+      'Georgia'
+    )
+
+    drawText(
+      ctx,
+      'memories worth keeping',
+      600,
+      195,
+      22,
+      '#be185d',
+      'normal'
+    )
+
+    const positions = [
+      [90, 280],
+      [610, 280],
+      [90, 950],
+      [610, 950]
+    ]
+
+    images.forEach((img, index) => {
+
+      const [x, y] =
+        positions[index]
+
+      ctx.fillStyle =
+        '#ffffff'
+
+      ctx.shadowColor =
+        'rgba(0,0,0,.15)'
+
+      ctx.shadowBlur = 20
+
+      roundedRect(
+        ctx,
+        x,
+        y,
+        480,
+        570,
+        30
+      )
+
+      ctx.fill()
+
+      ctx.shadowBlur = 0
+
+      drawRoundedImage(
+        ctx,
+        img,
+        x + 18,
+        y + 18,
+        444,
+        470,
+        20
+      )
+
+      drawText(
+        ctx,
+        '♡',
+        x + 240,
+        y + 525,
+        28,
+        '#ec4899'
+      )
+    })
+
+    drawText(
+      ctx,
+      '♡ forever memories ♡',
+      600,
+      1660,
+      26,
+      '#9d174d',
+      'bold',
+      'Georgia'
+    )
+  }
+
+  /* =================================================
+     KAWAII
+  ================================================= */
+
+  else if (template.style === 'kawaii') {
+
+    drawText(
+      ctx,
+      template.name,
+      600,
+      100,
+      58,
+      '#be185d',
+      'bold',
+      'Georgia'
+    )
+
+    drawText(
+      ctx,
+      'Captured moments',
+      600,
+      155,
+      24,
+      '#9d174d',
+      'normal'
+    )
+
+    const positions = [
+      [90, 240],
+      [610, 240],
+      [90, 900],
+      [610, 900]
+    ]
+
+    images.forEach((img, index) => {
+
+      const [x, y] =
+        positions[index]
+
+      ctx.fillStyle =
+        'rgba(255,255,255,.92)'
+
+      roundedRect(
+        ctx,
+        x,
+        y,
+        480,
+        570,
+        35
+      )
+
+      ctx.fill()
+
+      drawRoundedImage(
+        ctx,
+        img,
+        x + 15,
+        y + 15,
+        450,
+        500,
+        28
+      )
+
+      drawText(
+        ctx,
+        '♡',
+        x + 240,
+        y + 535,
+        30,
+        '#ec4899'
+      )
+    })
+
+    drawText(
+      ctx,
+      'cute memories',
+      600,
+      1620,
+      28,
+      '#be185d',
+      'bold',
+      'Georgia'
+    )
+  }
+
+  /* =================================================
+     FILM
+  ================================================= */
+
+  else if (template.style === 'film') {
+
+    ctx.fillStyle =
+      '#181818'
+
+    ctx.fillRect(
+      50,
+      50,
+      1100,
+      1700
+    )
+
+    drawText(
+      ctx,
+      'FILM',
+      600,
+      115,
+      70,
+      '#ffffff',
+      'bold',
+      'Georgia'
+    )
+
+    drawText(
+      ctx,
+      template.name,
+      600,
+      175,
+      24,
+      '#dddddd',
+      'normal'
+    )
+
+    let y = 250
+
+    images.forEach((img, index) => {
+
+      ctx.fillStyle =
+        '#eeeeee'
+
+      ctx.fillRect(
+        150,
+        y,
+        900,
+        330
+      )
+
+      drawCover(
+        ctx,
+        img,
+        170,
+        y + 20,
+        860,
+        280
+      )
+
+      drawText(
+        ctx,
+        `FRAME ${index + 1}`,
+        600,
+        y + 305,
+        16,
+        '#111111'
+      )
+
+      y += 375
+    })
+
+    drawText(
+      ctx,
+      'FILM MEMORIES',
+      600,
+      1690,
+      20,
+      '#ffffff'
+    )
+  }
+
+  /* =================================================
+     POLAROID - 3 FOTO
+  ================================================= */
+
+  else if (template.style === 'polaroid') {
+
+    drawText(
+      ctx,
+      template.name,
+      600,
+      110,
+      58,
+      '#292524',
+      'bold',
+      'Georgia'
+    )
+
+    const positions = [
+      [100, 260],
+      [610, 260],
+      [355, 940]
+    ]
+
+    images.forEach((img, index) => {
+
+      const [x, y] =
+        positions[index]
+
+      ctx.save()
+
+      ctx.translate(
+        x + 220,
+        y + 260
+      )
+
+      const rotation =
+        index === 0
+          ? -2
+          : index === 1
+            ? 2
+            : -1
+
+      ctx.rotate(
+        rotation *
+        Math.PI /
+        180
+      )
+
+      ctx.fillStyle =
+        '#ffffff'
+
+      ctx.shadowColor =
+        'rgba(0,0,0,.18)'
+
+      ctx.shadowBlur = 20
+
+      ctx.fillRect(
+        -220,
+        -260,
+        440,
+        560
+      )
+
+      ctx.shadowBlur = 0
+
+      drawCover(
+        ctx,
+        img,
+        -195,
+        -235,
+        390,
+        390
+      )
+
+      drawText(
+        ctx,
+        `memory ${index + 1}`,
+        0,
+        225,
+        20,
+        '#44403c',
+        'normal',
+        'Georgia'
+      )
+
+      ctx.restore()
+    })
+
+    drawText(
+      ctx,
+      '♡ memories ♡',
+      600,
+      1640,
+      28,
+      '#57534e',
+      'normal',
+      'Georgia'
+    )
+  }
+
+  /* =================================================
+     MAGAZINE - 3 FOTO
+  ================================================= */
+
+  else if (template.style === 'magazine') {
+
+    ctx.fillStyle =
+      '#18181b'
+
+    ctx.fillRect(
+      45,
+      45,
+      1110,
+      1710
+    )
+
+    drawText(
+      ctx,
+      'SPECIAL',
+      600,
+      110,
+      24,
+      '#ffffff'
+    )
+
+    drawText(
+      ctx,
+      template.name,
+      600,
+      180,
+      72,
+      '#ffffff',
+      'bold',
+      'Georgia'
+    )
+
+    /*
+     * FOTO 1 BESAR
+     */
+    drawCover(
+      ctx,
+      images[0],
+      100,
+      280,
+      1000,
+      700
+    )
+
+    /*
+     * FOTO 2
+     */
+    drawCover(
+      ctx,
+      images[1],
+      100,
+      1030,
+      480,
+      480
+    )
+
+    /*
+     * FOTO 3
+     */
+    drawCover(
+      ctx,
+      images[2],
+      620,
+      1030,
+      480,
+      480
+    )
+
+    drawText(
+      ctx,
+      'MAGAZINE EDITION',
+      600,
+      1620,
+      22,
+      '#ffffff'
+    )
+  }
+
+  /* =================================================
+     MINIMAL
+  ================================================= */
+
+  else if (template.style === 'minimal') {
+
+    drawText(
+      ctx,
+      template.name,
+      600,
+      100,
+      48,
+      '#18181b',
+      'normal'
+    )
+
+    const count =
+      images.length
+
+    const gap = 30
+
+    const top = 180
+
+    const available =
+      H - top - 150 -
+      gap * (count - 1)
+
+    const photoHeight =
+      available / count
+
+    images.forEach((img, index) => {
+
+      drawCover(
+        ctx,
+        img,
+        120,
+        top +
+          index *
+          (photoHeight + gap),
+        960,
+        photoHeight
+      )
+    })
+
+    drawText(
+      ctx,
+      'simple moments',
+      600,
+      1715,
+      22,
+      '#71717a',
+      'normal'
+    )
+  }
+
+  /* =================================================
+     RETRO
+  ================================================= */
+
+  else if (template.style === 'retro') {
+
+    drawText(
+      ctx,
+      template.name,
+      600,
+      110,
+      62,
+      '#7f1d1d',
+      'bold',
+      'Georgia'
+    )
+
+    const positions = [
+      [100, 230],
+      [610, 230],
+      [100, 850],
+      [610, 850]
+    ]
+
+    images.forEach((img, index) => {
+
+      const [x, y] =
+        positions[index]
+
+      ctx.fillStyle =
+        '#fef3c7'
+
+      ctx.fillRect(
+        x,
+        y,
+        470,
+        520
+      )
+
+      drawCover(
+        ctx,
+        img,
+        x + 20,
+        y + 20,
+        430,
+        430
+      )
+
+      drawText(
+        ctx,
+        'GOOD TIMES',
+        x + 235,
+        y + 480,
+        17,
+        '#7f1d1d',
+        'bold',
+        'Georgia'
+      )
+    })
+  }
+
+  /* =================================================
+     DARK LUXURY
+  ================================================= */
+
+  else if (template.style === 'luxury') {
+
+    ctx.fillStyle =
+      '#111111'
+
+    ctx.fillRect(
+      0,
+      0,
+      W,
+      H
+    )
+
+    drawText(
+      ctx,
+      template.name,
+      600,
+      110,
+      58,
+      '#d4af37',
+      'bold',
+      'Georgia'
+    )
+
+    drawText(
+      ctx,
+      'PRIVATE EDITION',
+      600,
+      165,
+      20,
+      '#ffffff'
+    )
+
+    const positions = [
+      [100, 250],
+      [620, 250],
+      [100, 850],
+      [620, 850]
+    ]
+
+    images.forEach((img, index) => {
+
+      const [x, y] =
+        positions[index]
+
+      ctx.strokeStyle =
+        '#d4af37'
+
+      ctx.lineWidth = 3
+
+      ctx.strokeRect(
+        x,
+        y,
+        480,
+        500
+      )
+
+      drawCover(
+        ctx,
+        img,
+        x + 15,
+        y + 15,
+        450,
+        450
+      )
+    })
+
+    drawText(
+      ctx,
+      'LUXURY MEMORIES',
+      600,
+      1640,
+      22,
+      '#d4af37'
+    )
+  }
+
+  /* =================================================
+     BLUE
+  ================================================= */
+
+  else if (template.style === 'blue') {
+
+    drawText(
+      ctx,
+      template.name,
+      600,
+      110,
+      60,
+      '#1d4ed8',
+      'bold',
+      'Georgia'
+    )
+
+    images.forEach((img, index) => {
+
+      const x =
+        index % 2 === 0
+          ? 90
+          : 610
+
+      const y =
+        index < 2
+          ? 250
+          : 930
+
+      drawRoundedImage(
+        ctx,
+        img,
+        x,
+        y,
+        480,
+        560,
+        30
+      )
+    })
+
+    drawText(
+      ctx,
+      'GOOD VIBES',
+      600,
+      1650,
+      25,
+      '#1d4ed8'
+    )
+  }
+
+  /* =================================================
+     PURPLE
+  ================================================= */
+
+  else if (template.style === 'purple') {
+
+    ctx.fillStyle =
+      '#1e1b4b'
+
+    ctx.fillRect(
+      0,
+      0,
+      W,
+      H
+    )
+
+    drawText(
+      ctx,
+      template.name,
+      600,
+      120,
+      60,
+      '#ddd6fe',
+      'bold',
+      'Georgia'
+    )
+
+    images.forEach((img, index) => {
+
+      const y =
+        240 + index * 350
+
+      drawRoundedImage(
+        ctx,
+        img,
+        120,
+        y,
+        960,
+        300,
+        25
+      )
+    })
+  }
+
+  /* =================================================
+     CUTE / FLOWER / BEAR / DIARY
+  ================================================= */
+
+  else if (
+    ['flower', 'bear', 'diary'].includes(
+      template.style
+    )
+  ) {
+
+    drawText(
+      ctx,
+      '♡',
+      600,
+      80,
+      45,
+      '#db2777'
+    )
+
+    drawText(
+      ctx,
+      template.name,
+      600,
+      140,
+      58,
+      '#9d174d',
+      'bold',
+      'Georgia'
+    )
+
+    const positions = [
+      [90, 250],
+      [610, 250],
+      [90, 900],
+      [610, 900]
+    ]
+
+    images.forEach((img, index) => {
+
+      const [x, y] =
+        positions[index]
+
+      drawRoundedImage(
+        ctx,
+        img,
+        x,
+        y,
+        480,
+        550,
+        35
+      )
+    })
+
+    drawText(
+      ctx,
+      '♡ memories ♡',
+      600,
+      1640,
+      28,
+      '#be185d',
+      'bold',
+      'Georgia'
+    )
+  }
+
+  /* =================================================
+     COQUETTE
+  ================================================= */
+
+  else if (template.style === 'coquette') {
+
+    drawText(
+      ctx,
+      '୨୧',
+      600,
+      90,
+      50,
+      '#be185d'
+    )
+
+    drawText(
+      ctx,
+      template.name,
+      600,
+      155,
+      58,
+      '#9f1239',
+      'bold',
+      'Georgia'
+    )
+
+    images.forEach((img, index) => {
+
+      const x =
+        index % 2 === 0
+          ? 100
+          : 620
+
+      const y =
+        index < 2
+          ? 270
+          : 940
+
+      ctx.fillStyle =
+        '#ffffff'
+
+      roundedRect(
+        ctx,
+        x,
+        y,
+        480,
+        540,
+        30
+      )
+
+      ctx.fill()
+
+      drawRoundedImage(
+        ctx,
+        img,
+        x + 15,
+        y + 15,
+        450,
+        450,
+        25
+      )
+
+      drawText(
+        ctx,
+        '♡',
+        x + 240,
+        y + 495,
+        28,
+        '#be185d'
+      )
+    })
+  }
+
+  /* =================================================
+     FRIENDS
+  ================================================= */
+
+  else if (template.style === 'friends') {
+
+    drawText(
+      ctx,
+      'BEST FRIENDS',
+      600,
+      120,
+      58,
+      '#1d4ed8',
+      'bold',
+      'Arial'
+    )
+
+    images.forEach((img, index) => {
+
+      const x =
+        index % 2 === 0
+          ? 90
+          : 610
+
+      const y =
+        index < 2
+          ? 250
+          : 900
+
+      drawRoundedImage(
+        ctx,
+        img,
+        x,
+        y,
+        480,
+        520,
+        35
+      )
+
+      drawText(
+        ctx,
+        `#${index + 1}`,
+        x + 240,
+        y + 480,
+        20,
+        '#1d4ed8'
+      )
+    })
+  }
+
+  /* =================================================
+     LETTER
+  ================================================= */
+
+  else if (template.style === 'letter') {
+
+    drawText(
+      ctx,
+      'Dear Memories,',
+      600,
+      120,
+      58,
+      '#9a3412',
+      'bold',
+      'Georgia'
+    )
+
+    images.forEach((img, index) => {
+
+      const y =
+        230 + index * 360
+
+      drawRoundedImage(
+        ctx,
+        img,
+        120,
+        y,
+        960,
+        300,
+        20
+      )
+    })
+
+    drawText(
+      ctx,
+      'with love ♡',
+      600,
+      1680,
+      28,
+      '#c2410c',
+      'normal',
+      'cursive'
+    )
+  }
+
+  /* =================================================
+     Y2K
+  ================================================= */
+
+  else if (template.style === 'y2k') {
+
+    ctx.fillStyle =
+      '#fae8ff'
+
+    ctx.fillRect(
+      0,
+      0,
+      W,
+      H
+    )
+
+    drawText(
+      ctx,
+      '★ Y2K ★',
+      600,
+      110,
+      65,
+      '#c026d3',
+      'bold',
+      'Arial'
+    )
+
+    images.forEach((img, index) => {
+
+      const x =
+        index % 2 === 0
+          ? 90
+          : 610
+
+      const y =
+        index < 2
+          ? 250
+          : 900
+
+      drawRoundedImage(
+        ctx,
+        img,
+        x,
+        y,
+        480,
+        540,
+        35
+      )
+    })
+  }
+
+  /* =================================================
+     NEWSPAPER
+  ================================================= */
+
+  else if (template.style === 'newspaper') {
+
+    ctx.fillStyle =
+      '#f5f5f4'
+
+    ctx.fillRect(
+      0,
+      0,
+      W,
+      H
+    )
+
+    drawText(
+      ctx,
+      'THE MEMORY TIMES',
+      600,
+      100,
+      55,
+      '#292524',
+      'bold',
+      'Georgia'
+    )
+
+    ctx.strokeStyle =
+      '#292524'
+
+    ctx.lineWidth = 3
+
+    ctx.beginPath()
+
+    ctx.moveTo(
+      80,
+      170
+    )
+
+    ctx.lineTo(
+      1120,
+      170
+    )
+
+    ctx.stroke()
+
+    images.forEach((img, index) => {
+
+      const x =
+        index % 2 === 0
+          ? 90
+          : 610
+
+      const y =
+        index < 2
+          ? 240
+          : 920
+
+      drawCover(
+        ctx,
+        img,
+        x,
+        y,
+        480,
+        500
+      )
+    })
+  }
+
+  /* =================================================
+     RED
+  ================================================= */
+
+  else if (template.style === 'red') {
+
+    drawText(
+      ctx,
+      'LOVE',
+      600,
+      100,
+      75,
+      '#b91c1c',
+      'bold',
+      'Georgia'
+    )
+
+    drawText(
+      ctx,
+      template.name,
+      600,
+      165,
+      25,
+      '#991b1b'
+    )
+
+    images.forEach((img, index) => {
+
+      drawRoundedImage(
+        ctx,
+        img,
+        100,
+        240 + index * 350,
+        1000,
+        300,
+        30
+      )
+    })
+  }
+
+  /* =================================================
+     OCEAN
+  ================================================= */
+
+  else if (template.style === 'ocean') {
+
+    drawText(
+      ctx,
+      'OCEAN',
+      600,
+      110,
+      70,
+      '#0369a1',
+      'bold',
+      'Georgia'
+    )
+
+    images.forEach((img, index) => {
+
+      drawRoundedImage(
+        ctx,
+        img,
+        100,
+        230 + index * 350,
+        1000,
+        300,
+        30
+      )
+    })
+
+    drawText(
+      ctx,
+      'GOOD VIBES',
+      600,
+      1680,
+      25,
+      '#0369a1'
+    )
+  }
+
+  /* =================================================
+     GREEN
+  ================================================= */
+
+  else if (template.style === 'green') {
+
+    drawText(
+      ctx,
+      template.name,
+      600,
+      120,
+      60,
+      '#047857',
+      'normal',
+      'Georgia'
+    )
+
+    images.forEach((img, index) => {
+
+      drawCover(
+        ctx,
+        img,
+        100,
+        230 + index * 350,
+        1000,
+        300
+      )
+    })
+  }
+
+  /* =================================================
+     STREET
+  ================================================= */
+
+  else if (template.style === 'street') {
+
+    ctx.fillStyle =
+      '#111827'
+
+    ctx.fillRect(
+      0,
+      0,
+      W,
+      H
+    )
+
+    drawText(
+      ctx,
+      'STREET',
+      600,
+      120,
+      75,
+      '#ffffff',
+      'bold',
+      'Arial'
+    )
+
+    images.forEach((img, index) => {
+
+      drawCover(
+        ctx,
+        img,
+        80,
+        240 + index * 350,
+        1040,
+        300
+      )
+    })
+  }
+
+  /* =================================================
+     WEDDING
+  ================================================= */
+
+  else if (template.style === 'wedding') {
+
+    drawText(
+      ctx,
+      '♡',
+      600,
+      70,
+      45,
+      '#78716c'
+    )
+
+    drawText(
+      ctx,
+      template.name,
+      600,
+      135,
+      65,
+      '#57534e',
+      'normal',
+      'Georgia'
+    )
+
+    images.forEach((img, index) => {
+
+      drawRoundedImage(
+        ctx,
+        img,
+        100,
+        230 + index * 350,
+        1000,
+        300,
+        25
+      )
+    })
+
+    drawText(
+      ctx,
+      'forever & always',
+      600,
+      1680,
+      25,
+      '#78716c',
+      'normal',
+      'Georgia'
+    )
+  }
+
+  /* =================================================
+     VERTICAL
+  ================================================= */
+
+  else if (template.style === 'vertical') {
+
+    drawText(
+      ctx,
+      template.name,
+      600,
+      100,
+      60,
+      '#be123c',
+      'bold',
+      'Georgia'
+    )
+
+    drawText(
+      ctx,
+      '♡ memories ♡',
+      600,
+      155,
+      22,
+      '#e11d48'
+    )
+
+    /*
+     * 4 FOTO VERTICAL
+     */
+    const photoHeight = 330
+
+    images.forEach((img, index) => {
+
+      const y =
+        220 +
+        index *
+        380
+
+      ctx.fillStyle =
+        '#ffffff'
+
+      roundedRect(
+        ctx,
+        80,
+        y,
+        1040,
+        photoHeight + 20,
+        25
+      )
+
+      ctx.fill()
+
+      drawRoundedImage(
+        ctx,
+        img,
+        95,
+        y + 10,
+        1010,
+        photoHeight,
+        18
+      )
+
+      drawText(
+        ctx,
+        String(index + 1).padStart(2, '0'),
+        600,
+        y + photoHeight + 38,
+        18,
+        '#be123c'
+      )
+    })
+  }
+
+  /* =================================================
+     FALLBACK
+  ================================================= */
+
+  else {
+
+    drawText(
+      ctx,
+      template.name,
+      600,
+      110,
+      58,
+      '#18181b',
+      'bold',
+      'Georgia'
+    )
+
+    const count =
+      images.length
+
+    const gap = 30
+
+    const top = 220
+
+    const available =
+      1500 -
+      gap * (count - 1)
+
+    const height =
+      available / count
+
+    images.forEach((img, index) => {
+
+      drawRoundedImage(
+        ctx,
+        img,
+        100,
+        top +
+          index *
+          (height + gap),
+        1000,
+        height,
+        25
+      )
+    })
+  }
+
+  /* =================================================
+     RESULT
+  ================================================= */
+
+  resultUrl.value =
+    canvas.value.toDataURL(
+      'image/jpeg',
+      0.95
+    )
+
+  loading.value = false
 }
 
-const download = async () => {
-  if(!resultUrl.value) return
-  try {
-    const blob=await (await fetch(resultUrl.value)).blob();const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=`photobooth-${title.value.toLowerCase().replace(/\s+/g,'-')}.jpg`;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000)
-  } catch { window.open(resultUrl.value,'_blank') }
+/* =====================================================
+   DOWNLOAD
+===================================================== */
+
+const download = () => {
+
+  if (!resultUrl.value) {
+    return
+  }
+
+  const link =
+    document.createElement('a')
+
+  link.href =
+    resultUrl.value
+
+  link.download =
+    `photobooth-${template.name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-|-$/g, '')}.jpg`
+
+  document.body.appendChild(link)
+
+  link.click()
+
+  document.body.removeChild(link)
 }
 
-const retake=()=>navigateTo(`/camera?template=${template.value.id}`)
-const home=()=>navigateTo('/')
+/* =====================================================
+   RETAKE
+===================================================== */
 
-onMounted(async()=>{
-  try { const saved=localStorage.getItem('photobooth_photos'); const parsed=saved?JSON.parse(saved):[];photos.value=Array.isArray(parsed)?parsed:[] } catch { photos.value=[] }
-  if(photos.value.length) await generate(); else loading.value=false
-})
+const retake = () => {
+
+  /*
+   * hapus foto lama
+   */
+  localStorage.removeItem(
+    'photobooth_photos'
+  )
+
+  navigateTo(
+    `/camera?template=${template.id}`
+  )
+}
+
+/* =====================================================
+   HOME
+===================================================== */
+
+const home = () => {
+
+  localStorage.removeItem(
+    'photobooth_photos'
+  )
+
+  navigateTo('/')
+}
 </script>
 
 <template>
   <div class="page">
+
     <header class="header">
-      <button class="home-btn" @click="home">← <span>Home</span></button>
-      <div class="brand">📸 <span>Photobooth</span></div>
-      <div class="template-badge">{{ template.name }} • {{ photoCount }} Photos</div>
+
+      <button
+        class="home-button"
+        @click="home"
+      >
+        ← Home
+      </button>
+
+      <div class="brand">
+        📸
+        <span>Photobooth</span>
+      </div>
+
+      <div class="template-badge">
+        {{ template.name }}
+      </div>
+
     </header>
-    <main class="main">
-      <section class="heading"><div class="eyebrow">YOUR MEMORIES</div><h1>Your Result</h1><p>{{ subtitle }}</p></section>
-      <div v-if="loading" class="state-card"><div class="loader"></div><h2>Membuat hasil foto...</h2><p>Menyesuaikan dengan template {{ template.name }}.</p></div>
-      <div v-else-if="errorMessage" class="state-card error"><div class="state-icon">⚠️</div><h2>Hasil belum lengkap</h2><p>{{ errorMessage }}</p><button class="primary-btn" @click="retake">Foto Lagi</button></div>
-      <section v-else-if="resultUrl" class="result-section">
-        <div class="result-card"><img :src="resultUrl" alt="Hasil Photobooth" class="result-image"></div>
-        <div class="actions"><button class="download-btn" @click="download">↓ Download JPG</button><button class="retake-btn" @click="retake">📸 Foto Lagi</button></div>
-        <div class="result-info"><div class="check">✓</div><div><strong>{{ template.name }} berhasil dibuat</strong><span>{{ photoCount }} foto • layout mengikuti template yang dipilih</span></div></div>
+
+    <main>
+
+      <section class="hero">
+
+        <div class="eyebrow">
+          YOUR RESULT
+        </div>
+
+        <h1>
+          {{ template.name }}
+        </h1>
+
+        <p>
+          {{ template.category }}
+          ·
+          {{ template.photos }} Photos
+        </p>
+
       </section>
-      <section v-else class="state-card"><div class="state-icon">📷</div><h2>Belum ada foto</h2><p>Ambil foto terlebih dahulu.</p><button class="primary-btn" @click="retake">Ambil Foto</button></section>
+
+      <div
+        v-if="loading"
+        class="loading"
+      >
+        <div class="spinner"></div>
+
+        <strong>
+          Membuat hasil foto...
+        </strong>
+
+        <span>
+          Menyesuaikan layout
+          {{ template.name }}
+        </span>
+      </div>
+
+      <section
+        v-else-if="resultUrl"
+        class="result-section"
+      >
+
+        <div class="result-frame">
+
+          <img
+            :src="resultUrl"
+            :alt="template.name"
+          >
+
+        </div>
+
+        <div class="actions">
+
+          <button
+            class="download-button"
+            @click="download"
+          >
+            <span>↓</span>
+            Download JPG
+          </button>
+
+          <button
+            class="retake-button"
+            @click="retake"
+          >
+            📸 Foto Lagi
+          </button>
+
+        </div>
+
+        <p class="info">
+          {{ template.photos }}
+          foto berhasil digabung
+          menjadi satu gambar JPG.
+        </p>
+
+      </section>
+
+      <section
+        v-else
+        class="empty"
+      >
+
+        <div class="empty-icon">
+          📷
+        </div>
+
+        <h2>
+          Foto belum lengkap
+        </h2>
+
+        <p>
+          Template ini membutuhkan
+          {{ template.photos }} foto.
+        </p>
+
+        <button
+          class="download-button"
+          @click="retake"
+        >
+          Ambil Foto
+        </button>
+
+      </section>
+
     </main>
-    <canvas ref="canvas" class="hidden-canvas"></canvas>
+
+    <canvas
+      ref="canvas"
+      class="canvas"
+    />
+
   </div>
 </template>
 
 <style scoped>
-*{box-sizing:border-box}.page{min-height:100vh;background:radial-gradient(circle at top left,#fdf2f8,transparent 35%),radial-gradient(circle at bottom right,#f3e8ff,transparent 35%),#fafafa;color:#18181b;font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif}.header{height:76px;display:flex;align-items:center;justify-content:space-between;padding:0 5%;background:rgba(255,255,255,.94);backdrop-filter:blur(18px);border-bottom:1px solid rgba(0,0,0,.06);position:sticky;top:0;z-index:20}.home-btn{border:0;background:none;display:flex;align-items:center;gap:8px;font-size:15px;font-weight:700;color:#52525b;cursor:pointer}.brand{display:flex;align-items:center;gap:8px;font-size:21px;font-weight:900;color:#7c3aed}.template-badge{padding:8px 13px;border-radius:999px;background:#f5f3ff;color:#7c3aed;font-size:12px;font-weight:800}.main{width:92%;max-width:820px;margin:auto;padding:48px 0 90px}.heading{text-align:center;margin-bottom:30px}.eyebrow{color:#7c3aed;font-size:11px;font-weight:900;letter-spacing:4px;margin-bottom:10px}.heading h1{margin:0;font-family:Georgia,serif;font-size:clamp(34px,6vw,52px);line-height:1.05}.heading p{margin:12px auto 0;color:#71717a;font-size:15px}.result-card{width:min(100%,620px);margin:auto;padding:14px;background:#fff;border-radius:28px;box-shadow:0 30px 80px rgba(0,0,0,.15);border:1px solid rgba(0,0,0,.05)}.result-image{width:100%;display:block;border-radius:18px;height:auto}.actions{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:24px}.actions button,.primary-btn{min-height:56px;border-radius:16px;border:0;font-size:15px;font-weight:850;cursor:pointer}.download-btn{background:linear-gradient(135deg,#7c3aed,#db2777);color:#fff}.retake-btn{background:#fff;color:#3f3f46;border:1px solid #d4d4d8!important}.result-info{margin:18px auto 0;display:flex;align-items:center;gap:12px;width:min(100%,620px);padding:15px 17px;border:1px solid #e4e4e7;border-radius:16px;background:#fff}.result-info .check{width:34px;height:34px;border-radius:50%;display:grid;place-items:center;background:#dcfce7;color:#15803d;font-weight:900}.result-info strong,.result-info span{display:block}.result-info strong{font-size:14px}.result-info span{margin-top:3px;color:#71717a;font-size:12px}.state-card{background:#fff;border:1px solid #e4e4e7;border-radius:24px;padding:70px 25px;text-align:center}.state-card h2{margin:15px 0 6px}.state-card p{color:#71717a}.state-card.error{border-color:#fecaca}.state-icon{font-size:42px}.primary-btn{padding:0 24px;background:linear-gradient(135deg,#7c3aed,#db2777);color:#fff}.loader{width:42px;height:42px;border:4px solid #e9d5ff;border-top-color:#7c3aed;border-radius:50%;margin:auto;animation:spin .8s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}.hidden-canvas{display:none}@media(max-width:600px){.header{padding:0 18px}.template-badge{display:none}.main{width:94%;padding-top:30px}.actions{grid-template-columns:1fr}.result-card{padding:8px;border-radius:20px}.result-image{border-radius:14px}.heading h1{font-size:36px}}
+
+* {
+  box-sizing: border-box;
+}
+
+.page {
+  min-height: 100vh;
+  background:
+    radial-gradient(
+      circle at top,
+      #ffffff 0%,
+      #fafafa 55%,
+      #f4f4f5 100%
+    );
+
+  color: #18181b;
+
+  font-family:
+    Inter,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
+}
+
+.header {
+  height: 76px;
+
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+
+  padding:
+    0 clamp(18px, 5vw, 70px);
+
+  background:
+    rgba(255,255,255,.9);
+
+  backdrop-filter:
+    blur(15px);
+
+  border-bottom:
+    1px solid #e4e4e7;
+
+  position: sticky;
+
+  top: 0;
+
+  z-index: 20;
+}
+
+.home-button {
+  border: none;
+
+  background: transparent;
+
+  color: #52525b;
+
+  font-size: 15px;
+
+  font-weight: 700;
+
+  cursor: pointer;
+}
+
+.brand {
+  display: flex;
+
+  align-items: center;
+
+  gap: 8px;
+
+  font-size: 22px;
+
+  font-weight: 900;
+
+  color: #7c3aed;
+}
+
+.template-badge {
+  padding:
+    8px 14px;
+
+  border-radius: 999px;
+
+  background: #f4f4f5;
+
+  color: #52525b;
+
+  font-size: 12px;
+
+  font-weight: 700;
+}
+
+main {
+  width: 94%;
+
+  max-width: 900px;
+
+  margin:
+    auto;
+
+  padding:
+    45px 0 90px;
+}
+
+.hero {
+  text-align: center;
+
+  margin-bottom: 35px;
+}
+
+.eyebrow {
+  color: #7c3aed;
+
+  font-size: 11px;
+
+  font-weight: 900;
+
+  letter-spacing: 4px;
+}
+
+.hero h1 {
+  margin:
+    8px 0;
+
+  font-size:
+    clamp(32px, 6vw, 52px);
+
+  line-height: 1.1;
+
+  font-family:
+    Georgia,
+    serif;
+}
+
+.hero p {
+  margin: 0;
+
+  color: #71717a;
+
+  font-size: 15px;
+}
+
+.result-section {
+  width: 100%;
+}
+
+.result-frame {
+  width: 100%;
+
+  max-width: 650px;
+
+  margin:
+    auto;
+
+  padding: 12px;
+
+  background:
+    #ffffff;
+
+  border-radius: 26px;
+
+  box-shadow:
+    0 25px 80px
+    rgba(0,0,0,.15);
+
+  border:
+    1px solid
+    rgba(0,0,0,.05);
+}
+
+.result-frame img {
+  width: 100%;
+
+  height: auto;
+
+  display: block;
+
+  border-radius: 17px;
+}
+
+.actions {
+  display: flex;
+
+  gap: 14px;
+
+  justify-content: center;
+
+  margin-top: 28px;
+}
+
+.actions button {
+  min-height: 54px;
+
+  padding:
+    0 28px;
+
+  border-radius: 15px;
+
+  border: none;
+
+  font-size: 15px;
+
+  font-weight: 800;
+
+  cursor: pointer;
+
+  transition:
+    transform .2s,
+    box-shadow .2s;
+}
+
+.actions button:active {
+  transform:
+    scale(.97);
+}
+
+.download-button {
+  color: white;
+
+  background:
+    linear-gradient(
+      135deg,
+      #7c3aed,
+      #db2777
+    );
+
+  box-shadow:
+    0 12px 30px
+    rgba(124,58,237,.25);
+}
+
+.retake-button {
+  background: white;
+
+  color: #3f3f46;
+
+  border:
+    1px solid
+    #d4d4d8 !important;
+}
+
+.info {
+  text-align: center;
+
+  color: #a1a1aa;
+
+  font-size: 13px;
+
+  margin-top: 18px;
+}
+
+.loading {
+  min-height: 300px;
+
+  display: flex;
+
+  flex-direction: column;
+
+  align-items: center;
+
+  justify-content: center;
+
+  gap: 10px;
+
+  color: #52525b;
+}
+
+.loading span {
+  color: #a1a1aa;
+
+  font-size: 13px;
+}
+
+.spinner {
+  width: 42px;
+
+  height: 42px;
+
+  border:
+    4px solid
+    #e4e4e7;
+
+  border-top-color:
+    #7c3aed;
+
+  border-radius: 50%;
+
+  animation:
+    spin .8s linear infinite;
+
+  margin-bottom: 8px;
+}
+
+@keyframes spin {
+  to {
+    transform:
+      rotate(360deg);
+  }
+}
+
+.empty {
+  text-align: center;
+
+  background: white;
+
+  border:
+    1px solid #e4e4e7;
+
+  border-radius: 25px;
+
+  padding: 70px 20px;
+}
+
+.empty-icon {
+  font-size: 50px;
+
+  margin-bottom: 15px;
+}
+
+.empty h2 {
+  margin: 0 0 8px;
+}
+
+.empty p {
+  color: #71717a;
+
+  margin-bottom: 25px;
+}
+
+.canvas {
+  display: none;
+}
+
+@media (max-width: 600px) {
+
+  .header {
+    height: 68px;
+  }
+
+  .brand {
+    font-size: 19px;
+  }
+
+  .template-badge {
+    display: none;
+  }
+
+  main {
+    width: 94%;
+
+    padding-top: 28px;
+  }
+
+  .hero {
+    margin-bottom: 25px;
+  }
+
+  .actions {
+    flex-direction: column;
+  }
+
+  .actions button {
+    width: 100%;
+  }
+
+  .result-frame {
+    padding: 8px;
+
+    border-radius: 20px;
+  }
+
+  .result-frame img {
+    border-radius: 13px;
+  }
+}
+
 </style>
