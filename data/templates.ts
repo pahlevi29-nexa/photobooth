@@ -1,147 +1,203 @@
-export type TemplateLayout =
-  | 'vertical'
-  | 'film'
-  | 'grid'
-  | 'polaroid'
-  | 'editorial'
-  | 'scrapbook'
-  | 'magazine'
-  | 'retro'
-  | 'minimal'
-  | 'cute'
-  | 'dark'
-  | 'classic'
-
 export interface PhotoTemplate {
   id: number
   name: string
   category: string
-  layout: TemplateLayout
-  colors: [string, string]
-  title: string
-  subtitle: string
+  photos: number
+  style: string
+  colors: string[]
 }
 
 export const templates: PhotoTemplate[] = [
-
   {
     id: 1,
     name: 'Sweet Love',
-    category: 'Romantic',
-    layout: 'vertical',
-    colors: ['#fff1f6', '#ffd6e7'],
-    title: 'SWEET LOVE',
-    subtitle: 'little moments, big memories'
+    category: 'Couple',
+    photos: 4,
+    style: 'love',
+    colors: ['#ffe4ec', '#ff8fab']
   },
-
   {
     id: 2,
-    name: 'Film Story',
-    category: 'Aesthetic',
-    layout: 'film',
-    colors: ['#1f1f1f', '#555555'],
-    title: 'FILM STORY',
-    subtitle: 'ROLL • FRAME • MEMORY'
+    name: 'Kawaii Pink',
+    category: 'Cute',
+    photos: 4,
+    style: 'kawaii',
+    colors: ['#fff0f6', '#f472b6']
   },
-
   {
     id: 3,
-    name: 'Four Moments',
-    category: 'Classic',
-    layout: 'grid',
-    colors: ['#f8f7f4', '#e9e4dc'],
-    title: 'FOUR MOMENTS',
-    subtitle: 'captured together'
+    name: 'Film Memories',
+    category: 'Vintage',
+    photos: 4,
+    style: 'film',
+    colors: ['#e7dfd3', '#433d38']
   },
-
   {
     id: 4,
-    name: 'Polaroid Diary',
+    name: 'Classic Polaroid',
     category: 'Vintage',
-    layout: 'polaroid',
-    colors: ['#f5efe5', '#e4d4c2'],
-    title: 'POLAROID DIARY',
-    subtitle: 'dear memories'
+    photos: 3,
+    style: 'polaroid',
+    colors: ['#f5f5f5', '#222']
   },
-
   {
     id: 5,
-    name: 'Editorial',
-    category: 'Elegant',
-    layout: 'editorial',
-    colors: ['#f5f1ec', '#ded6cb'],
-    title: 'EDITORIAL',
-    subtitle: 'ISSUE 01 • MEMORY'
+    name: 'Best Friends',
+    category: 'Friends',
+    photos: 4,
+    style: 'friends',
+    colors: ['#dbeafe', '#3b82f6']
   },
-
   {
     id: 6,
-    name: 'Scrapbook',
+    name: 'Coquette',
     category: 'Cute',
-    layout: 'scrapbook',
-    colors: ['#fff7d6', '#ffd6df'],
-    title: 'OUR DAY',
-    subtitle: '♡ keep this forever ♡'
+    photos: 4,
+    style: 'coquette',
+    colors: ['#fff1f2', '#be185d']
   },
-
   {
     id: 7,
     name: 'Magazine',
-    category: 'Fashion',
-    layout: 'magazine',
-    colors: ['#f4f0ff', '#dcd0ff'],
-    title: 'THE MOMENT',
-    subtitle: 'SPECIAL EDITION'
+    category: 'Aesthetic',
+    photos: 3,
+    style: 'magazine',
+    colors: ['#f4f4f5', '#18181b']
   },
-
   {
     id: 8,
-    name: 'Retro Club',
-    category: 'Retro',
-    layout: 'retro',
-    colors: ['#f8d99b', '#d98282'],
-    title: 'RETRO CLUB',
-    subtitle: 'GOOD TIMES ONLY'
+    name: 'Dark Luxury',
+    category: 'Elegant',
+    photos: 4,
+    style: 'luxury',
+    colors: ['#18181b', '#d4af37']
   },
-
   {
     id: 9,
-    name: 'Clean Memories',
-    category: 'Minimal',
-    layout: 'minimal',
-    colors: ['#ffffff', '#f1f1f1'],
-    title: 'MEMORIES',
-    subtitle: 'simple & timeless'
+    name: 'Blue Boy',
+    category: 'Men',
+    photos: 4,
+    style: 'blue',
+    colors: ['#dbeafe', '#1d4ed8']
   },
-
   {
     id: 10,
-    name: 'Cute Diary',
-    category: 'Cute',
-    layout: 'cute',
-    colors: ['#ffe5f0', '#eadcff'],
-    title: 'CUTE DIARY',
-    subtitle: '♡ smile today ♡'
+    name: 'Purple Night',
+    category: 'Aesthetic',
+    photos: 4,
+    style: 'purple',
+    colors: ['#ede9fe', '#7c3aed']
   },
-
   {
     id: 11,
-    name: 'Midnight',
-    category: 'Dark',
-    layout: 'dark',
-    colors: ['#15151a', '#30263c'],
-    title: 'MIDNIGHT',
-    subtitle: 'NIGHT • LIGHTS • MEMORIES'
+    name: 'Retro Camera',
+    category: 'Vintage',
+    photos: 4,
+    style: 'retro',
+    colors: ['#fef3c7', '#92400e']
   },
-
   {
     id: 12,
-    name: 'Classic Booth',
-    category: 'Photobooth',
-    layout: 'classic',
-    colors: ['#eeeeee', '#ffffff'],
-    title: 'PHOTOBOOTH',
-    subtitle: 'MEMORY NO. 001'
+    name: 'Flower Diary',
+    category: 'Cute',
+    photos: 4,
+    style: 'flower',
+    colors: ['#fce7f3', '#db2777']
+  },
+  {
+    id: 13,
+    name: 'Minimal Day',
+    category: 'Minimal',
+    photos: 4,
+    style: 'minimal',
+    colors: ['#ffffff', '#171717']
+  },
+  {
+    id: 14,
+    name: 'Love Letter',
+    category: 'Couple',
+    photos: 4,
+    style: 'letter',
+    colors: ['#fff7ed', '#c2410c']
+  },
+  {
+    id: 15,
+    name: 'Y2K Star',
+    category: 'Aesthetic',
+    photos: 4,
+    style: 'y2k',
+    colors: ['#fae8ff', '#c026d3']
+  },
+  {
+    id: 16,
+    name: 'Sweet Bear',
+    category: 'Cute',
+    photos: 4,
+    style: 'bear',
+    colors: ['#fef3c7', '#92400e']
+  },
+  {
+    id: 17,
+    name: 'Newspaper',
+    category: 'Vintage',
+    photos: 4,
+    style: 'newspaper',
+    colors: ['#f5f5f4', '#292524']
+  },
+  {
+    id: 18,
+    name: 'Red Romance',
+    category: 'Couple',
+    photos: 4,
+    style: 'red',
+    colors: ['#fee2e2', '#b91c1c']
+  },
+  {
+    id: 19,
+    name: 'Ocean',
+    category: 'Men',
+    photos: 4,
+    style: 'ocean',
+    colors: ['#cffafe', '#0369a1']
+  },
+  {
+    id: 20,
+    name: 'Soft Green',
+    category: 'Minimal',
+    photos: 4,
+    style: 'green',
+    colors: ['#ecfdf5', '#047857']
+  },
+  {
+    id: 21,
+    name: 'Pink Diary',
+    category: 'Cute',
+    photos: 4,
+    style: 'diary',
+    colors: ['#fce7f3', '#9d174d']
+  },
+  {
+    id: 22,
+    name: 'Street',
+    category: 'Men',
+    photos: 4,
+    style: 'street',
+    colors: ['#e5e7eb', '#111827']
+  },
+  {
+    id: 23,
+    name: 'Wedding',
+    category: 'Elegant',
+    photos: 4,
+    style: 'wedding',
+    colors: ['#fafaf9', '#78716c']
+  },
+  {
+    id: 24,
+    name: 'Vertical Love',
+    category: 'Couple',
+    photos: 4,
+    style: 'vertical',
+    colors: ['#ffe4e6', '#e11d48']
   }
-
 ]
