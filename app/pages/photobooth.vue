@@ -1,316 +1,244 @@
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { ref, onMounted, nextTick } from 'vue'
+import { templates } from '~/data/templates'
 
-interface Photo {
-  src: string
-}
+const route = useRoute()
 
-interface Template {
-  id: number
-  name: string
-  type: string
-  bg: string
-  text: string
-  accent: string
-}
+/* =========================================================
+   TEMPLATE
+========================================================= */
 
-const video = ref<HTMLVideoElement | null>(null)
-const previewCanvas = ref<HTMLCanvasElement | null>(null)
+const templateId = Number(route.query.template || 1)
 
-const stream = ref<MediaStream | null>(null)
+const template =
+  templates.find((t: any) => Number(t.id) === templateId) ||
+  templates[0]
 
-const cameraActive = ref(false)
-const countdown = ref(0)
-const capturing = ref(false)
+/* =========================================================
+   STATE
+========================================================= */
 
-const photos = ref<Photo[]>([])
-const selectedTemplate = ref(1)
+const photos = ref<string[]>([])
+const resultUrl = ref('')
+const loading = ref(true)
+const errorMessage = ref('')
 
-const name = ref('')
+const canvas = ref<HTMLCanvasElement | null>(null)
 
-const templates: Template[] = [
-  {
-    id: 1,
-    name: 'Sweet Pink',
-    type: 'pink',
-    bg: '#fce7f3',
-    text: '#9d174d',
-    accent: '#ec4899'
-  },
-  {
-    id: 2,
-    name: 'Black Elegant',
-    type: 'black',
-    bg: '#111111',
-    text: '#ffffff',
-    accent: '#d4af37'
-  },
-  {
-    id: 3,
-    name: 'Minimal White',
-    type: 'minimal',
-    bg: '#ffffff',
-    text: '#222222',
-    accent: '#111111'
-  },
-  {
-    id: 4,
-    name: 'Film Strip',
-    type: 'film',
-    bg: '#171717',
-    text: '#ffffff',
-    accent: '#ffffff'
-  },
-  {
-    id: 5,
-    name: 'Flower Love',
-    type: 'flower',
-    bg: '#fff1f2',
-    text: '#be123c',
-    accent: '#fb7185'
-  },
-  {
-    id: 6,
-    name: 'Magazine',
-    type: 'magazine',
-    bg: '#f5f5f4',
-    text: '#18181b',
-    accent: '#ef4444'
-  },
-  {
-    id: 7,
-    name: 'Polaroid',
-    type: 'polaroid',
-    bg: '#e5e7eb',
-    text: '#111827',
-    accent: '#ffffff'
-  },
-  {
-    id: 8,
-    name: 'Ocean Blue',
-    type: 'blue',
-    bg: '#dbeafe',
-    text: '#1e3a8a',
-    accent: '#2563eb'
-  },
-  {
-    id: 9,
-    name: 'Cute Pastel',
-    type: 'pastel',
-    bg: '#fef3c7',
-    text: '#78350f',
-    accent: '#f59e0b'
-  },
-  {
-    id: 10,
-    name: 'Luxury Gold',
-    type: 'gold',
-    bg: '#18181b',
-    text: '#fef3c7',
-    accent: '#d4af37'
-  },
-  {
-    id: 11,
-    name: 'Purple Night',
-    type: 'purple',
-    bg: '#2e1065',
-    text: '#f5f3ff',
-    accent: '#a855f7'
-  },
-  {
-    id: 12,
-    name: 'Vertical Collage',
-    type: 'vertical',
-    bg: '#fafafa',
-    text: '#171717',
-    accent: '#171717'
-  }
-]
+/* =========================================================
+   SAFE TEMPLATE DATA
+========================================================= */
 
-const currentTemplate = () => {
-  return templates.find(t => t.id === selectedTemplate.value) || templates[0]
-}
+const templateName = String(
+  (template as any)?.name || 'Classic'
+)
 
-/* ================================
-   CAMERA
-================================ */
+const templateTitle = String(
+  (template as any)?.title || templateName
+)
 
-const startCamera = async () => {
-  try {
-    stream.value = await navigator.mediaDevices.getUserMedia({
-      video: {
-        facingMode: 'user',
-        width: {
-          ideal: 1280
-        },
-        height: {
-          ideal: 720
-        }
-      },
-      audio: false
-    })
+const templateSubtitle = String(
+  (template as any)?.subtitle || 'Captured moments'
+)
 
-    await nextTick()
+const templateLayout = String(
+  (template as any)?.layout || 'classic'
+)
 
-    if (video.value) {
-      video.value.srcObject = stream.value
-      await video.value.play()
-      cameraActive.value = true
-    }
-  } catch (error) {
-    console.error(error)
+const templateColors = Array.isArray(
+  (template as any)?.colors
+)
+  ? (template as any).colors
+  : ['#fce7f3', '#fbcfe8']
 
-    alert(
-      'Kamera tidak dapat digunakan. Pastikan izin kamera sudah diberikan pada browser.'
-    )
-  }
-}
+const color1 = templateColors[0] || '#fce7f3'
+const color2 = templateColors[1] || '#fbcfe8'
 
-const stopCamera = () => {
-  if (stream.value) {
-    stream.value.getTracks().forEach(track => track.stop())
-    stream.value = null
-  }
-
-  cameraActive.value = false
-}
-
-/* ================================
-   COUNTDOWN
-================================ */
-
-const wait = (ms: number) => {
-  return new Promise(resolve => setTimeout(resolve, ms))
-}
-
-const runCountdown = async () => {
-  capturing.value = true
-
-  for (let i = 3; i >= 1; i--) {
-    countdown.value = i
-    await wait(1000)
-  }
-
-  countdown.value = 0
-}
-
-/* ================================
-   CAPTURE PHOTO
-================================ */
-
-const capturePhoto = () => {
-  if (!video.value) return
-
-  const canvas = document.createElement('canvas')
-
-  canvas.width = 1080
-  canvas.height = 720
-
-  const ctx = canvas.getContext('2d')
-
-  if (!ctx) return
-
-  const videoWidth = video.value.videoWidth
-  const videoHeight = video.value.videoHeight
-
-  const targetRatio = canvas.width / canvas.height
-  const videoRatio = videoWidth / videoHeight
-
-  let sx = 0
-  let sy = 0
-  let sw = videoWidth
-  let sh = videoHeight
-
-  if (videoRatio > targetRatio) {
-    sw = videoHeight * targetRatio
-    sx = (videoWidth - sw) / 2
-  } else {
-    sh = videoWidth / targetRatio
-    sy = (videoHeight - sh) / 2
-  }
-
-  /*
-    Mirror kamera agar seperti selfie
-  */
-  ctx.save()
-
-  ctx.translate(canvas.width, 0)
-  ctx.scale(-1, 1)
-
-  ctx.drawImage(
-    video.value,
-    sx,
-    sy,
-    sw,
-    sh,
-    0,
-    0,
-    canvas.width,
-    canvas.height
-  )
-
-  ctx.restore()
-
-  photos.value.push({
-    src: canvas.toDataURL('image/jpeg', 0.95)
-  })
-}
-
-/* ================================
-   TAKE 4 PHOTOS
-================================ */
-
-const takePhotos = async () => {
-  if (!cameraActive.value) {
-    await startCamera()
-  }
-
-  photos.value = []
-
-  for (let i = 0; i < 4; i++) {
-    await runCountdown()
-
-    capturePhoto()
-
-    await wait(800)
-  }
-
-  capturing.value = false
-
-  await nextTick()
-
-  drawPreview()
-}
-
-/* ================================
+/* =========================================================
    IMAGE LOADER
-================================ */
+========================================================= */
 
-const loadImage = (src: string): Promise<HTMLImageElement> => {
+const loadImage = (
+  src: string
+): Promise<HTMLImageElement> => {
   return new Promise((resolve, reject) => {
     const img = new Image()
 
     img.onload = () => resolve(img)
-    img.onerror = reject
+    img.onerror = () => reject(new Error('Gagal memuat foto'))
 
     img.src = src
   })
 }
 
-/* ================================
-   COVER IMAGE
-================================ */
+/* =========================================================
+   BACKGROUND GRADIENT
+========================================================= */
 
-const drawCoverImage = (
+const drawBackground = (
+  ctx: CanvasRenderingContext2D,
+  w: number,
+  h: number,
+  c1 = color1,
+  c2 = color2
+) => {
+  const gradient = ctx.createLinearGradient(
+    0,
+    0,
+    w,
+    h
+  )
+
+  gradient.addColorStop(0, c1)
+  gradient.addColorStop(1, c2)
+
+  ctx.fillStyle = gradient
+  ctx.fillRect(0, 0, w, h)
+}
+
+/* =========================================================
+   ROUNDED RECT
+========================================================= */
+
+const roundedRect = (
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  radius: number
+) => {
+  ctx.beginPath()
+  ctx.roundRect(
+    x,
+    y,
+    w,
+    h,
+    radius
+  )
+}
+
+/* =========================================================
+   TEXT
+========================================================= */
+
+const drawText = (
+  ctx: CanvasRenderingContext2D,
+  value: string,
+  x: number,
+  y: number,
+  size: number,
+  color: string,
+  weight = '700',
+  font = 'Arial',
+  align: CanvasTextAlign = 'center'
+) => {
+  ctx.fillStyle = color
+  ctx.font = `${weight} ${size}px ${font}`
+  ctx.textAlign = align
+  ctx.textBaseline = 'middle'
+
+  ctx.fillText(
+    value,
+    x,
+    y
+  )
+}
+
+/* =========================================================
+   FOTO - CONTAIN
+   TIDAK MEMOTONG FOTO
+========================================================= */
+
+const drawPhotoContain = (
   ctx: CanvasRenderingContext2D,
   img: HTMLImageElement,
   x: number,
   y: number,
-  width: number,
-  height: number
+  w: number,
+  h: number,
+  radius = 0,
+  backgroundColor = '#ffffff'
 ) => {
-  const imageRatio = img.width / img.height
-  const boxRatio = width / height
+  const imageRatio =
+    img.width / img.height
+
+  const boxRatio =
+    w / h
+
+  let dw = w
+  let dh = h
+
+  if (imageRatio > boxRatio) {
+    dw = w
+    dh = w / imageRatio
+  } else {
+    dh = h
+    dw = h * imageRatio
+  }
+
+  const dx =
+    x + (w - dw) / 2
+
+  const dy =
+    y + (h - dh) / 2
+
+  ctx.save()
+
+  if (radius > 0) {
+    roundedRect(
+      ctx,
+      x,
+      y,
+      w,
+      h,
+      radius
+    )
+
+    ctx.clip()
+  }
+
+  ctx.fillStyle =
+    backgroundColor
+
+  ctx.fillRect(
+    x,
+    y,
+    w,
+    h
+  )
+
+  ctx.drawImage(
+    img,
+    dx,
+    dy,
+    dw,
+    dh
+  )
+
+  ctx.restore()
+}
+
+/* =========================================================
+   FOTO - COVER
+   DIGUNAKAN HANYA PADA TEMPLATE YANG MEMANG
+   MEMBUTUHKAN FOTO FULL FRAME.
+========================================================= */
+
+const drawPhotoCover = (
+  ctx: CanvasRenderingContext2D,
+  img: HTMLImageElement,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  radius = 0
+) => {
+  const imageRatio =
+    img.width / img.height
+
+  const boxRatio =
+    w / h
 
   let sx = 0
   let sy = 0
@@ -318,11 +246,39 @@ const drawCoverImage = (
   let sh = img.height
 
   if (imageRatio > boxRatio) {
-    sw = img.height * boxRatio
-    sx = (img.width - sw) / 2
+    sw =
+      img.height * boxRatio
+
+    sx =
+      (img.width - sw) / 2
   } else {
-    sh = img.width / boxRatio
-    sy = (img.height - sh) / 2
+    sh =
+      img.width / boxRatio
+
+    /*
+     * Fokus crop sedikit ke atas
+     * agar wajah tidak hilang.
+     */
+    sy =
+      Math.max(
+        0,
+        (img.height - sh) * 0.25
+      )
+  }
+
+  ctx.save()
+
+  if (radius > 0) {
+    roundedRect(
+      ctx,
+      x,
+      y,
+      w,
+      h,
+      radius
+    )
+
+    ctx.clip()
   }
 
   ctx.drawImage(
@@ -333,1179 +289,1963 @@ const drawCoverImage = (
     sh,
     x,
     y,
-    width,
-    height
+    w,
+    h
   )
+
+  ctx.restore()
 }
 
-/* ================================
-   ROUNDED RECTANGLE
-================================ */
+/* =========================================================
+   SHADOW
+========================================================= */
 
-const roundedRect = (
+const shadow = (
+  ctx: CanvasRenderingContext2D
+) => {
+  ctx.shadowColor =
+    'rgba(0,0,0,0.15)'
+
+  ctx.shadowBlur = 25
+  ctx.shadowOffsetY = 10
+}
+
+/* =========================================================
+   RESET SHADOW
+========================================================= */
+
+const resetShadow = (
+  ctx: CanvasRenderingContext2D
+) => {
+  ctx.shadowColor =
+    'transparent'
+
+  ctx.shadowBlur = 0
+  ctx.shadowOffsetY = 0
+}
+
+/* =========================================================
+   WHITE FRAME
+========================================================= */
+
+const drawFrame = (
   ctx: CanvasRenderingContext2D,
   x: number,
   y: number,
   w: number,
   h: number,
-  r: number
+  radius = 24
 ) => {
-  ctx.beginPath()
+  ctx.save()
 
-  ctx.moveTo(x + r, y)
+  shadow(ctx)
 
-  ctx.lineTo(x + w - r, y)
+  ctx.fillStyle =
+    '#ffffff'
 
-  ctx.quadraticCurveTo(
-    x + w,
-    y,
-    x + w,
-    y + r
-  )
-
-  ctx.lineTo(x + w, y + h - r)
-
-  ctx.quadraticCurveTo(
-    x + w,
-    y + h,
-    x + w - r,
-    y + h
-  )
-
-  ctx.lineTo(x + r, y + h)
-
-  ctx.quadraticCurveTo(
-    x,
-    y + h,
-    x,
-    y + h - r
-  )
-
-  ctx.lineTo(x, y + r)
-
-  ctx.quadraticCurveTo(
+  roundedRect(
+    ctx,
     x,
     y,
-    x + r,
+    w,
+    h,
+    radius
+  )
+
+  ctx.fill()
+
+  resetShadow(ctx)
+
+  ctx.restore()
+}
+
+/* =========================================================
+   PHOTO NUMBER
+========================================================= */
+
+const photoNumber = (
+  ctx: CanvasRenderingContext2D,
+  number: number,
+  x: number,
+  y: number,
+  color = '#7c3aed'
+) => {
+  drawText(
+    ctx,
+    String(number).padStart(2, '0'),
+    x,
+    y,
+    20,
+    color,
+    '700',
+    'Arial'
+  )
+}
+
+/* =========================================================
+   DECORATION HEART
+========================================================= */
+
+const heart = (
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  size: number,
+  color: string
+) => {
+  ctx.save()
+
+  ctx.fillStyle = color
+  ctx.font = `${size}px Arial`
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
+
+  ctx.fillText(
+    '♡',
+    x,
     y
   )
 
-  ctx.closePath()
+  ctx.restore()
 }
 
-/* ================================
-   TEXT
-================================ */
+/* =========================================================
+   STAR
+========================================================= */
 
-const centerText = (
+const star = (
   ctx: CanvasRenderingContext2D,
-  text: string,
   x: number,
-  y: number
+  y: number,
+  size: number,
+  color: string
 ) => {
+  ctx.save()
+
+  ctx.fillStyle = color
+  ctx.font = `${size}px Arial`
   ctx.textAlign = 'center'
-  ctx.fillText(text, x, y)
-}
+  ctx.textBaseline = 'middle'
 
-/* ================================
-   DRAW TEMPLATE
-================================ */
-
-const drawPreview = async () => {
-  if (!previewCanvas.value) return
-  if (photos.value.length !== 4) return
-
-  const canvas = previewCanvas.value
-  const ctx = canvas.getContext('2d')
-
-  if (!ctx) return
-
-  const template = currentTemplate()
-
-  canvas.width = 1080
-  canvas.height = 1600
-
-  ctx.clearRect(0, 0, canvas.width, canvas.height)
-
-  ctx.fillStyle = template.bg
-  ctx.fillRect(0, 0, canvas.width, canvas.height)
-
-  const images = await Promise.all(
-    photos.value.map(photo => loadImage(photo.src))
+  ctx.fillText(
+    '✦',
+    x,
+    y
   )
 
-  /* ==================================
-     TEMPLATE 1 - SWEET PINK
-  ================================== */
-
-  if (template.type === 'pink') {
-    ctx.fillStyle = '#fce7f3'
-    ctx.fillRect(0, 0, 1080, 1600)
-
-    ctx.fillStyle = '#9d174d'
-    ctx.font = 'bold 64px Arial'
-
-    centerText(
-      ctx,
-      'LOVE',
-      540,
-      90
-    )
-
-    const positions = [
-      [70, 140],
-      [550, 140],
-      [70, 650],
-      [550, 650]
-    ]
-
-    images.forEach((img, i) => {
-      const [x, y] = positions[i]
-
-      ctx.save()
-
-      roundedRect(
-        ctx,
-        x,
-        y,
-        460,
-        440,
-        30
-      )
-
-      ctx.clip()
-
-      drawCoverImage(
-        ctx,
-        img,
-        x,
-        y,
-        460,
-        440
-      )
-
-      ctx.restore()
-    })
-
-    ctx.fillStyle = '#9d174d'
-    ctx.font = '34px Arial'
-
-    centerText(
-      ctx,
-      name.value || 'memories',
-      540,
-      1180
-    )
-
-    ctx.font = '26px Arial'
-
-    centerText(
-      ctx,
-      '♡ captured moments ♡',
-      540,
-      1230
-    )
-  }
-
-  /* ==================================
-     TEMPLATE 2 - BLACK ELEGANT
-  ================================== */
-
-  if (template.type === 'black') {
-    ctx.fillStyle = '#0f0f0f'
-    ctx.fillRect(0, 0, 1080, 1600)
-
-    ctx.strokeStyle = '#d4af37'
-    ctx.lineWidth = 5
-
-    ctx.strokeRect(
-      35,
-      35,
-      1010,
-      1530
-    )
-
-    ctx.fillStyle = '#ffffff'
-    ctx.font = 'bold 60px Georgia'
-
-    centerText(
-      ctx,
-      'MOMENTS',
-      540,
-      110
-    )
-
-    images.forEach((img, i) => {
-      const y = 150 + i * 330
-
-      drawCoverImage(
-        ctx,
-        img,
-        100,
-        y,
-        880,
-        285
-      )
-
-      ctx.strokeStyle = '#d4af37'
-      ctx.lineWidth = 3
-
-      ctx.strokeRect(
-        100,
-        y,
-        880,
-        285
-      )
-    })
-
-    ctx.fillStyle = '#d4af37'
-    ctx.font = '32px Arial'
-
-    centerText(
-      ctx,
-      name.value || 'PHOTOBOOTH',
-      540,
-      1510
-    )
-  }
-
-  /* ==================================
-     TEMPLATE 3 - MINIMAL
-  ================================== */
-
-  if (template.type === 'minimal') {
-    ctx.fillStyle = '#ffffff'
-    ctx.fillRect(0, 0, 1080, 1600)
-
-    ctx.fillStyle = '#111111'
-    ctx.font = 'bold 54px Arial'
-
-    centerText(
-      ctx,
-      name.value || 'MEMORIES',
-      540,
-      90
-    )
-
-    const positions = [
-      [60, 140],
-      [555, 140],
-      [60, 650],
-      [555, 650]
-    ]
-
-    images.forEach((img, i) => {
-      const [x, y] = positions[i]
-
-      drawCoverImage(
-        ctx,
-        img,
-        x,
-        y,
-        465,
-        465
-      )
-    })
-
-    ctx.fillStyle = '#777777'
-    ctx.font = '24px Arial'
-
-    centerText(
-      ctx,
-      'PHOTOBOOTH • 2026',
-      540,
-      1220
-    )
-  }
-
-  /* ==================================
-     TEMPLATE 4 - FILM STRIP
-  ================================== */
-
-  if (template.type === 'film') {
-    ctx.fillStyle = '#111111'
-    ctx.fillRect(0, 0, 1080, 1600)
-
-    ctx.fillStyle = '#ffffff'
-    ctx.font = 'bold 48px Arial'
-
-    centerText(
-      ctx,
-      'FILM STRIP',
-      540,
-      65
-    )
-
-    const x = 120
-    const width = 840
-    const height = 335
-
-    images.forEach((img, i) => {
-      const y = 100 + i * 370
-
-      drawCoverImage(
-        ctx,
-        img,
-        x,
-        y,
-        width,
-        height
-      )
-
-      ctx.fillStyle = '#ffffff'
-
-      for (let hole = 0; hole < 7; hole++) {
-        ctx.fillRect(
-          40,
-          y + hole * 48,
-          45,
-          25
-        )
-
-        ctx.fillRect(
-          995,
-          y + hole * 48,
-          45,
-          25
-        )
-      }
-    })
-  }
-
-  /* ==================================
-     TEMPLATE 5 - FLOWER LOVE
-  ================================== */
-
-  if (template.type === 'flower') {
-    ctx.fillStyle = '#fff1f2'
-    ctx.fillRect(0, 0, 1080, 1600)
-
-    ctx.fillStyle = '#be123c'
-    ctx.font = 'bold 70px Georgia'
-
-    centerText(
-      ctx,
-      'LOVE',
-      540,
-      100
-    )
-
-    ctx.font = '38px Arial'
-
-    centerText(
-      ctx,
-      '♡ forever memories ♡',
-      540,
-      150
-    )
-
-    const positions = [
-      [80, 200],
-      [570, 200],
-      [80, 700],
-      [570, 700]
-    ]
-
-    images.forEach((img, i) => {
-      const [x, y] = positions[i]
-
-      ctx.save()
-
-      roundedRect(
-        ctx,
-        x,
-        y,
-        430,
-        430,
-        40
-      )
-
-      ctx.clip()
-
-      drawCoverImage(
-        ctx,
-        img,
-        x,
-        y,
-        430,
-        430
-      )
-
-      ctx.restore()
-    })
-
-    ctx.fillStyle = '#fb7185'
-    ctx.font = '50px Arial'
-
-    centerText(
-      ctx,
-      '♥',
-      540,
-      1250
-    )
-  }
-
-  /* ==================================
-     TEMPLATE 6 - MAGAZINE
-  ================================== */
-
-  if (template.type === 'magazine') {
-    ctx.fillStyle = '#f5f5f4'
-    ctx.fillRect(0, 0, 1080, 1600)
-
-    ctx.fillStyle = '#111111'
-    ctx.font = 'bold 70px Arial'
-
-    centerText(
-      ctx,
-      'VIBE',
-      540,
-      100
-    )
-
-    ctx.fillStyle = '#ef4444'
-    ctx.font = 'bold 26px Arial'
-
-    centerText(
-      ctx,
-      'SPECIAL EDITION',
-      540,
-      145
-    )
-
-    drawCoverImage(
-      ctx,
-      images[0],
-      70,
-      190,
-      940,
-      550
-    )
-
-    drawCoverImage(
-      ctx,
-      images[1],
-      70,
-      780,
-      450,
-      450
-    )
-
-    drawCoverImage(
-      ctx,
-      images[2],
-      560,
-      780,
-      450,
-      450
-    )
-
-    drawCoverImage(
-      ctx,
-      images[3],
-      70,
-      1270,
-      940,
-      220
-    )
-
-    ctx.fillStyle = '#111111'
-    ctx.font = 'bold 30px Arial'
-
-    centerText(
-      ctx,
-      name.value || 'YOUR STORY',
-      540,
-      1540
-    )
-  }
-
-  /* ==================================
-     TEMPLATE 7 - POLAROID
-  ================================== */
-
-  if (template.type === 'polaroid') {
-    ctx.fillStyle = '#e5e7eb'
-    ctx.fillRect(0, 0, 1080, 1600)
-
-    ctx.fillStyle = '#111827'
-    ctx.font = 'bold 58px Georgia'
-
-    centerText(
-      ctx,
-      'POLAROID',
-      540,
-      90
-    )
-
-    const positions = [
-      [70, 150],
-      [570, 150],
-      [70, 720],
-      [570, 720]
-    ]
-
-    images.forEach((img, i) => {
-      const [x, y] = positions[i]
-
-      ctx.fillStyle = '#ffffff'
-
-      ctx.fillRect(
-        x,
-        y,
-        440,
-        500
-      )
-
-      drawCoverImage(
-        ctx,
-        img,
-        x + 20,
-        y + 20,
-        400,
-        390
-      )
-
-      ctx.fillStyle = '#111827'
-      ctx.font = '22px Arial'
-
-      centerText(
-        ctx,
-        `MEMORY ${i + 1}`,
-        x + 220,
-        y + 455
-      )
-    })
-  }
-
-  /* ==================================
-     TEMPLATE 8 - OCEAN BLUE
-  ================================== */
-
-  if (template.type === 'blue') {
-    ctx.fillStyle = '#dbeafe'
-    ctx.fillRect(0, 0, 1080, 1600)
-
-    ctx.fillStyle = '#1e3a8a'
-    ctx.font = 'bold 64px Arial'
-
-    centerText(
-      ctx,
-      'GOOD VIBES',
-      540,
-      100
-    )
-
-    const positions = [
-      [70, 170],
-      [550, 170],
-      [70, 650],
-      [550, 650]
-    ]
-
-    images.forEach((img, i) => {
-      const [x, y] = positions[i]
-
-      ctx.save()
-
-      roundedRect(
-        ctx,
-        x,
-        y,
-        460,
-        420,
-        25
-      )
-
-      ctx.clip()
-
-      drawCoverImage(
-        ctx,
-        img,
-        x,
-        y,
-        460,
-        420
-      )
-
-      ctx.restore()
-    })
-
-    ctx.fillStyle = '#1e3a8a'
-    ctx.font = '30px Arial'
-
-    centerText(
-      ctx,
-      name.value || 'good memories',
-      540,
-      1190
-    )
-  }
-
-  /* ==================================
-     TEMPLATE 9 - CUTE PASTEL
-  ================================== */
-
-  if (template.type === 'pastel') {
-    ctx.fillStyle = '#fef3c7'
-    ctx.fillRect(0, 0, 1080, 1600)
-
-    ctx.fillStyle = '#78350f'
-    ctx.font = 'bold 58px Arial'
-
-    centerText(
-      ctx,
-      'CUTIE MOMENTS',
-      540,
-      100
-    )
-
-    const positions = [
-      [80, 170],
-      [570, 170],
-      [80, 670],
-      [570, 670]
-    ]
-
-    images.forEach((img, i) => {
-      const [x, y] = positions[i]
-
-      ctx.save()
-
-      roundedRect(
-        ctx,
-        x,
-        y,
-        430,
-        430,
-        80
-      )
-
-      ctx.clip()
-
-      drawCoverImage(
-        ctx,
-        img,
-        x,
-        y,
-        430,
-        430
-      )
-
-      ctx.restore()
-    })
-
-    ctx.fillStyle = '#f59e0b'
-    ctx.font = '60px Arial'
-
-    centerText(
-      ctx,
-      '✦ ✦ ✦',
-      540,
-      1240
-    )
-
-    ctx.fillStyle = '#78350f'
-    ctx.font = '30px Arial'
-
-    centerText(
-      ctx,
-      name.value || 'sweet memories',
-      540,
-      1300
-    )
-  }
-
-  /* ==================================
-     TEMPLATE 10 - GOLD
-  ================================== */
-
-  if (template.type === 'gold') {
-    ctx.fillStyle = '#18181b'
-    ctx.fillRect(0, 0, 1080, 1600)
-
-    ctx.strokeStyle = '#d4af37'
-    ctx.lineWidth = 6
-
-    ctx.strokeRect(
-      40,
-      40,
-      1000,
-      1520
-    )
-
-    ctx.fillStyle = '#fef3c7'
-    ctx.font = 'bold 60px Georgia'
-
-    centerText(
-      ctx,
-      'LUXURY',
-      540,
-      110
-    )
-
-    images.forEach((img, i) => {
-      const y = 150 + i * 330
-
-      drawCoverImage(
-        ctx,
-        img,
-        150,
-        y,
-        780,
-        280
-      )
-
-      ctx.strokeStyle = '#d4af37'
-      ctx.lineWidth = 3
-
-      ctx.strokeRect(
-        150,
-        y,
-        780,
-        280
-      )
-    })
-
-    ctx.fillStyle = '#d4af37'
-    ctx.font = '30px Arial'
-
-    centerText(
-      ctx,
-      name.value || 'SPECIAL MOMENT',
-      540,
-      1510
-    )
-  }
-
-  /* ==================================
-     TEMPLATE 11 - PURPLE NIGHT
-  ================================== */
-
-  if (template.type === 'purple') {
-    ctx.fillStyle = '#2e1065'
-    ctx.fillRect(0, 0, 1080, 1600)
-
-    ctx.fillStyle = '#f5f3ff'
-    ctx.font = 'bold 65px Arial'
-
-    centerText(
-      ctx,
-      'NIGHT VIBES',
-      540,
-      100
-    )
-
-    const positions = [
-      [70, 170],
-      [550, 170],
-      [70, 660],
-      [550, 660]
-    ]
-
-    images.forEach((img, i) => {
-      const [x, y] = positions[i]
-
-      ctx.save()
-
-      roundedRect(
-        ctx,
-        x,
-        y,
-        460,
-        430,
-        35
-      )
-
-      ctx.clip()
-
-      drawCoverImage(
-        ctx,
-        img,
-        x,
-        y,
-        460,
-        430
-      )
-
-      ctx.restore()
-    })
-
-    ctx.fillStyle = '#c4b5fd'
-    ctx.font = '32px Arial'
-
-    centerText(
-      ctx,
-      name.value || 'PURPLE MEMORIES',
-      540,
-      1190
-    )
-  }
-
-  /* ==================================
-     TEMPLATE 12 - VERTICAL COLLAGE
-  ================================== */
-
-  if (template.type === 'vertical') {
-    ctx.fillStyle = '#fafafa'
-    ctx.fillRect(0, 0, 1080, 1600)
-
-    ctx.fillStyle = '#171717'
-    ctx.font = 'bold 58px Arial'
-
-    centerText(
-      ctx,
-      'MEMORIES',
-      540,
-      85
-    )
-
-    ctx.fillStyle = '#777777'
-    ctx.font = '22px Arial'
-
-    centerText(
-      ctx,
-      name.value || 'PHOTOBOOTH',
-      540,
-      125
-    )
-
-    /*
-      FOTO BENAR-BENAR VERTIKAL
-    */
-
-    const x = 100
-    const width = 880
-    const height = 300
-
-    images.forEach((img, i) => {
-      const y = 165 + i * 345
-
-      drawCoverImage(
-        ctx,
-        img,
-        x,
-        y,
-        width,
-        height
-      )
-
-      ctx.fillStyle = '#171717'
-      ctx.font = '18px Arial'
-
-      ctx.textAlign = 'left'
-
-      ctx.fillText(
-        `0${i + 1}`,
-        50,
-        y + 35
-      )
-    })
-
-    ctx.fillStyle = '#171717'
-    ctx.font = '28px Arial'
-
-    centerText(
-      ctx,
-      'EVERY MOMENT MATTERS',
-      540,
-      1540
-    )
-  }
+  ctx.restore()
 }
 
-/* ================================
-   DOWNLOAD
-================================ */
+/* =========================================================
+   GENERATE
+========================================================= */
 
-const downloadPhoto = async () => {
-  if (photos.value.length !== 4) {
-    alert('Ambil 4 foto terlebih dahulu.')
+const generate = async () => {
+  if (!canvas.value) {
     return
   }
 
-  await drawPreview()
+  loading.value = true
+  errorMessage.value = ''
 
-  await nextTick()
+  try {
+    const images: HTMLImageElement[] = []
 
-  const canvas = previewCanvas.value
+    for (
+      const photo of photos.value.slice(0, 4)
+    ) {
+      try {
+        const image =
+          await loadImage(photo)
 
-  if (!canvas) return
+        images.push(image)
+      } catch {
+        console.warn(
+          'Foto gagal dimuat'
+        )
+      }
+    }
 
-  const link = document.createElement('a')
+    if (!images.length) {
+      loading.value = false
+      return
+    }
 
-  link.download =
-    `photobooth-${currentTemplate().name.toLowerCase().replaceAll(' ', '-')}.jpg`
+    const ctx =
+      canvas.value.getContext('2d')
 
-  link.href = canvas.toDataURL(
-    'image/jpeg',
-    0.95
-  )
-
-  link.click()
-}
-
-/* ================================
-   TEMPLATE CHANGE
-================================ */
-
-const selectTemplate = async (id: number) => {
-  selectedTemplate.value = id
-
-  if (photos.value.length === 4) {
-    await nextTick()
-    drawPreview()
-  }
-}
-
-/* ================================
-   RESET
-================================ */
-
-const resetPhotos = () => {
-  photos.value = []
-  countdown.value = 0
-  capturing.value = false
-
-  if (previewCanvas.value) {
-    const ctx = previewCanvas.value.getContext('2d')
-
-    if (ctx) {
-      ctx.clearRect(
-        0,
-        0,
-        previewCanvas.value.width,
-        previewCanvas.value.height
+    if (!ctx) {
+      throw new Error(
+        'Canvas tidak tersedia'
       )
     }
+
+    /*
+     * RESOLUSI HASIL
+     *
+     * 1200 x 2200
+     *
+     * Cocok untuk HP dan JPG.
+     */
+
+    const W = 1200
+    const H = 2200
+
+    canvas.value.width = W
+    canvas.value.height = H
+
+    ctx.clearRect(
+      0,
+      0,
+      W,
+      H
+    )
+
+    /* =====================================================
+       TEMPLATE 1
+       KAWAII PINK - VERTICAL
+    ===================================================== */
+
+    if (
+      templateLayout === 'vertical'
+    ) {
+      drawBackground(
+        ctx,
+        W,
+        H,
+        '#fce7f3',
+        '#f9a8d4'
+      )
+
+      drawText(
+        ctx,
+        templateTitle,
+        600,
+        100,
+        58,
+        '#831843',
+        '700',
+        'Georgia'
+      )
+
+      drawText(
+        ctx,
+        templateSubtitle,
+        600,
+        155,
+        24,
+        '#9d174d',
+        '400',
+        'Arial'
+      )
+
+      const photoW = 600
+      const photoH = 430
+
+      const x =
+        (W - photoW) / 2
+
+      let y = 220
+
+      images.forEach(
+        (img, index) => {
+
+          drawFrame(
+            ctx,
+            x - 18,
+            y - 18,
+            photoW + 36,
+            photoH + 36,
+            28
+          )
+
+          drawPhotoContain(
+            ctx,
+            img,
+            x,
+            y,
+            photoW,
+            photoH,
+            18,
+            '#f5f5f5'
+          )
+
+          photoNumber(
+            ctx,
+            index + 1,
+            600,
+            y + photoH + 45,
+            '#9d174d'
+          )
+
+          y += 500
+        }
+      )
+
+      heart(
+        ctx,
+        600,
+        H - 80,
+        60,
+        '#db2777'
+      )
+    }
+
+    /* =====================================================
+       TEMPLATE 2
+       FILM STRIP
+    ===================================================== */
+
+    else if (
+      templateLayout === 'film'
+    ) {
+      drawBackground(
+        ctx,
+        W,
+        H,
+        '#18181b',
+        '#27272a'
+      )
+
+      ctx.fillStyle =
+        '#09090b'
+
+      ctx.fillRect(
+        70,
+        50,
+        1060,
+        2100
+      )
+
+      drawText(
+        ctx,
+        templateTitle,
+        600,
+        120,
+        56,
+        '#ffffff',
+        '700',
+        'Georgia'
+      )
+
+      drawText(
+        ctx,
+        templateSubtitle,
+        600,
+        175,
+        22,
+        '#d4d4d8'
+      )
+
+      const photoW = 520
+      const photoH = 410
+
+      const x =
+        (W - photoW) / 2
+
+      let y = 250
+
+      images.forEach(
+        (img, index) => {
+
+          ctx.fillStyle =
+            '#ffffff'
+
+          ctx.fillRect(
+            x - 18,
+            y - 18,
+            photoW + 36,
+            photoH + 36
+          )
+
+          drawPhotoContain(
+            ctx,
+            img,
+            x,
+            y,
+            photoW,
+            photoH,
+            0,
+            '#e4e4e7'
+          )
+
+          drawText(
+            ctx,
+            `FRAME ${index + 1}`,
+            600,
+            y + photoH + 35,
+            16,
+            '#18181b',
+            '700'
+          )
+
+          y += 475
+        }
+      )
+
+      star(
+        ctx,
+        600,
+        2110,
+        40,
+        '#ffffff'
+      )
+    }
+
+    /* =====================================================
+       TEMPLATE 3
+       GRID 2x2
+    ===================================================== */
+
+    else if (
+      templateLayout === 'grid'
+    ) {
+      drawBackground(
+        ctx,
+        W,
+        H,
+        '#fafaf9',
+        '#e7e5e4'
+      )
+
+      drawText(
+        ctx,
+        templateTitle,
+        600,
+        110,
+        58,
+        '#292524',
+        '700',
+        'Georgia'
+      )
+
+      drawText(
+        ctx,
+        templateSubtitle,
+        600,
+        160,
+        22,
+        '#78716c'
+      )
+
+      const photoW = 450
+      const photoH = 600
+
+      const positions = [
+        [110, 250],
+        [640, 250],
+        [110, 960],
+        [640, 960]
+      ]
+
+      images.forEach(
+        (img, index) => {
+
+          const [x, y] =
+            positions[index]
+
+          drawFrame(
+            ctx,
+            x - 15,
+            y - 15,
+            photoW + 30,
+            photoH + 30,
+            24
+          )
+
+          drawPhotoContain(
+            ctx,
+            img,
+            x,
+            y,
+            photoW,
+            photoH,
+            15,
+            '#f5f5f4'
+          )
+
+          photoNumber(
+            ctx,
+            index + 1,
+            x + photoW / 2,
+            y + photoH + 42,
+            '#57534e'
+          )
+        }
+      )
+
+      drawText(
+        ctx,
+        'MEMORIES',
+        600,
+        1690,
+        20,
+        '#78716c',
+        '700',
+        'Georgia'
+      )
+    }
+
+    /* =====================================================
+       TEMPLATE 4
+       POLAROID
+    ===================================================== */
+
+    else if (
+      templateLayout === 'polaroid'
+    ) {
+      drawBackground(
+        ctx,
+        W,
+        H,
+        '#f5f5f4',
+        '#d6d3d1'
+      )
+
+      drawText(
+        ctx,
+        templateTitle,
+        600,
+        105,
+        56,
+        '#44403c',
+        '700',
+        'Georgia'
+      )
+
+      const photoW = 400
+      const photoH = 500
+
+      const positions = [
+        [110, 240],
+        [690, 240],
+        [110, 940],
+        [690, 940]
+      ]
+
+      images.forEach(
+        (img, index) => {
+
+          const [x, y] =
+            positions[index]
+
+          ctx.save()
+
+          ctx.translate(
+            x + 200,
+            y + 250
+          )
+
+          ctx.rotate(
+            (index % 2 === 0 ? -2 : 2) *
+              Math.PI /
+              180
+          )
+
+          ctx.fillStyle =
+            '#ffffff'
+
+          ctx.shadowColor =
+            'rgba(0,0,0,.18)'
+
+          ctx.shadowBlur = 20
+          ctx.shadowOffsetY = 10
+
+          ctx.fillRect(
+            -220,
+            -270,
+            440,
+            590
+          )
+
+          ctx.shadowColor =
+            'transparent'
+
+          drawPhotoContain(
+            ctx,
+            img,
+            -200,
+            -250,
+            400,
+            500,
+            0,
+            '#eeeeee'
+          )
+
+          drawText(
+            ctx,
+            `memory ${index + 1}`,
+            0,
+            285,
+            18,
+            '#57534e',
+            '400',
+            'cursive'
+          )
+
+          ctx.restore()
+        }
+      )
+
+      heart(
+        ctx,
+        600,
+        1770,
+        60,
+        '#78716c'
+      )
+    }
+
+    /* =====================================================
+       TEMPLATE 5
+       EDITORIAL
+    ===================================================== */
+
+    else if (
+      templateLayout === 'editorial'
+    ) {
+      drawBackground(
+        ctx,
+        W,
+        H,
+        '#fafaf9',
+        '#f5f5f4'
+      )
+
+      drawText(
+        ctx,
+        'THE',
+        600,
+        80,
+        20,
+        '#78716c',
+        '700'
+      )
+
+      drawText(
+        ctx,
+        templateTitle,
+        600,
+        145,
+        76,
+        '#1c1917',
+        '700',
+        'Georgia'
+      )
+
+      drawText(
+        ctx,
+        templateSubtitle,
+        600,
+        200,
+        20,
+        '#78716c',
+        '400'
+      )
+
+      /* FOTO UTAMA */
+
+      drawFrame(
+        ctx,
+        80,
+        260,
+        1040,
+        690,
+        25
+      )
+
+      drawPhotoContain(
+        ctx,
+        images[0],
+        100,
+        280,
+        1000,
+        650,
+        15,
+        '#e7e5e4'
+      )
+
+      /* FOTO 2 */
+
+      if (images[1]) {
+        drawFrame(
+          ctx,
+          80,
+          1010,
+          500,
+          620,
+          22
+        )
+
+        drawPhotoContain(
+          ctx,
+          images[1],
+          100,
+          1030,
+          460,
+          580,
+          15,
+          '#e7e5e4'
+        )
+      }
+
+      /* FOTO 3 */
+
+      if (images[2]) {
+        drawFrame(
+          ctx,
+          620,
+          1010,
+          500,
+          620,
+          22
+        )
+
+        drawPhotoContain(
+          ctx,
+          images[2],
+          640,
+          1030,
+          460,
+          580,
+          15,
+          '#e7e5e4'
+        )
+      }
+
+      /* FOTO 4 */
+
+      if (images[3]) {
+        drawFrame(
+          ctx,
+          80,
+          1680,
+          1040,
+          350,
+          22
+        )
+
+        drawPhotoContain(
+          ctx,
+          images[3],
+          100,
+          1700,
+          1000,
+          310,
+          15,
+          '#e7e5e4'
+        )
+      }
+    }
+
+    /* =====================================================
+       TEMPLATE 6
+       SCRAPBOOK
+    ===================================================== */
+
+    else if (
+      templateLayout === 'scrapbook'
+    ) {
+      drawBackground(
+        ctx,
+        W,
+        H,
+        '#fff7ed',
+        '#fce7f3'
+      )
+
+      drawText(
+        ctx,
+        templateTitle,
+        600,
+        110,
+        64,
+        '#be185d',
+        '700',
+        'cursive'
+      )
+
+      const positions = [
+        [110, 240, -3],
+        [690, 240, 3],
+        [110, 960, 3],
+        [690, 960, -3]
+      ]
+
+      const photoW = 400
+      const photoH = 500
+
+      images.forEach(
+        (img, index) => {
+
+          const [x, y, rotation] =
+            positions[index]
+
+          ctx.save()
+
+          ctx.translate(
+            x + 200,
+            y + 250
+          )
+
+          ctx.rotate(
+            rotation *
+              Math.PI /
+              180
+          )
+
+          ctx.fillStyle =
+            '#ffffff'
+
+          ctx.shadowColor =
+            'rgba(0,0,0,.15)'
+
+          ctx.shadowBlur = 20
+          ctx.shadowOffsetY = 8
+
+          ctx.fillRect(
+            -220,
+            -270,
+            440,
+            600
+          )
+
+          ctx.shadowColor =
+            'transparent'
+
+          drawPhotoContain(
+            ctx,
+            img,
+            -200,
+            -250,
+            photoW,
+            photoH,
+            0,
+            '#f3f4f6'
+          )
+
+          heart(
+            ctx,
+            0,
+            290,
+            40,
+            '#ec4899'
+          )
+
+          ctx.restore()
+        }
+      )
+
+      drawText(
+        ctx,
+        templateSubtitle,
+        600,
+        1810,
+        30,
+        '#be185d',
+        '700',
+        'cursive'
+      )
+    }
+
+    /* =====================================================
+       TEMPLATE 7
+       MAGAZINE
+    ===================================================== */
+
+    else if (
+      templateLayout === 'magazine'
+    ) {
+      drawBackground(
+        ctx,
+        W,
+        H,
+        '#18181b',
+        '#09090b'
+      )
+
+      drawText(
+        ctx,
+        'SPECIAL EDITION',
+        600,
+        90,
+        22,
+        '#ffffff',
+        '700'
+      )
+
+      drawText(
+        ctx,
+        templateTitle,
+        600,
+        165,
+        78,
+        '#ffffff',
+        '700',
+        'Georgia'
+      )
+
+      drawText(
+        ctx,
+        templateSubtitle,
+        600,
+        215,
+        20,
+        '#a1a1aa'
+      )
+
+      /* MAIN */
+
+      drawFrame(
+        ctx,
+        80,
+        280,
+        1040,
+        700,
+        10
+      )
+
+      drawPhotoContain(
+        ctx,
+        images[0],
+        100,
+        300,
+        1000,
+        660,
+        0,
+        '#27272a'
+      )
+
+      /* SECOND */
+
+      if (images[1]) {
+        drawFrame(
+          ctx,
+          80,
+          1040,
+          500,
+          620,
+          10
+        )
+
+        drawPhotoContain(
+          ctx,
+          images[1],
+          100,
+          1060,
+          460,
+          580,
+          0,
+          '#27272a'
+        )
+      }
+
+      /* THIRD */
+
+      if (images[2]) {
+        drawFrame(
+          ctx,
+          620,
+          1040,
+          500,
+          620,
+          10
+        )
+
+        drawPhotoContain(
+          ctx,
+          images[2],
+          640,
+          1060,
+          460,
+          580,
+          0,
+          '#27272a'
+        )
+      }
+
+      if (images[3]) {
+        drawPhotoContain(
+          ctx,
+          images[3],
+          80,
+          1740,
+          1040,
+          300,
+          0,
+          '#27272a'
+        )
+      }
+    }
+
+    /* =====================================================
+       TEMPLATE 8
+       RETRO
+    ===================================================== */
+
+    else if (
+      templateLayout === 'retro'
+    ) {
+      drawBackground(
+        ctx,
+        W,
+        H,
+        '#fef3c7',
+        '#fde68a'
+      )
+
+      drawText(
+        ctx,
+        templateTitle,
+        600,
+        115,
+        68,
+        '#7f1d1d',
+        '700',
+        'Georgia'
+      )
+
+      drawText(
+        ctx,
+        templateSubtitle,
+        600,
+        170,
+        20,
+        '#92400e'
+      )
+
+      const positions = [
+        [100, 260],
+        [630, 260],
+        [100, 970],
+        [630, 970]
+      ]
+
+      images.forEach(
+        (img, index) => {
+
+          const [x, y] =
+            positions[index]
+
+          ctx.fillStyle =
+            '#fff7ed'
+
+          ctx.fillRect(
+            x,
+            y,
+            470,
+            620
+          )
+
+          drawPhotoContain(
+            ctx,
+            img,
+            x + 20,
+            y + 20,
+            430,
+            540,
+            0,
+            '#f5f5f4'
+          )
+
+          drawText(
+            ctx,
+            'GOOD TIMES',
+            x + 235,
+            y + 585,
+            17,
+            '#7f1d1d',
+            '700',
+            'Georgia'
+          )
+        }
+      )
+    }
+
+    /* =====================================================
+       TEMPLATE 9
+       MINIMAL
+    ===================================================== */
+
+    else if (
+      templateLayout === 'minimal'
+    ) {
+      drawBackground(
+        ctx,
+        W,
+        H,
+        '#ffffff',
+        '#f4f4f5'
+      )
+
+      drawText(
+        ctx,
+        templateTitle,
+        600,
+        100,
+        52,
+        '#18181b',
+        '400',
+        'Georgia'
+      )
+
+      drawText(
+        ctx,
+        templateSubtitle,
+        600,
+        150,
+        20,
+        '#71717a',
+        '400'
+      )
+
+      const photoW = 650
+      const photoH = 400
+
+      const x = 275
+
+      let y = 230
+
+      images.forEach(
+        (img, index) => {
+
+          drawPhotoContain(
+            ctx,
+            img,
+            x,
+            y,
+            photoW,
+            photoH,
+            18,
+            '#f4f4f5'
+          )
+
+          photoNumber(
+            ctx,
+            index + 1,
+            600,
+            y + photoH + 35,
+            '#52525b'
+          )
+
+          y += 500
+        }
+      )
+
+      drawText(
+        ctx,
+        'SIMPLE MOMENTS',
+        600,
+        2130,
+        18,
+        '#71717a',
+        '400'
+      )
+    }
+
+    /* =====================================================
+       TEMPLATE 10
+       CUTE
+    ===================================================== */
+
+    else if (
+      templateLayout === 'cute'
+    ) {
+      drawBackground(
+        ctx,
+        W,
+        H,
+        '#fdf2f8',
+        '#fbcfe8'
+      )
+
+      heart(
+        ctx,
+        600,
+        75,
+        55,
+        '#db2777'
+      )
+
+      drawText(
+        ctx,
+        templateTitle,
+        600,
+        145,
+        64,
+        '#be185d',
+        '700',
+        'cursive'
+      )
+
+      drawText(
+        ctx,
+        templateSubtitle,
+        600,
+        195,
+        20,
+        '#db2777'
+      )
+
+      const photoW = 440
+      const photoH = 590
+
+      const positions = [
+        [100, 280],
+        [660, 280],
+        [100, 990],
+        [660, 990]
+      ]
+
+      images.forEach(
+        (img, index) => {
+
+          const [x, y] =
+            positions[index]
+
+          drawFrame(
+            ctx,
+            x - 12,
+            y - 12,
+            photoW + 24,
+            photoH + 24,
+            35
+          )
+
+          drawPhotoContain(
+            ctx,
+            img,
+            x,
+            y,
+            photoW,
+            photoH,
+            28,
+            '#fdf2f8'
+          )
+
+          heart(
+            ctx,
+            x + photoW / 2,
+            y + photoH + 38,
+            30,
+            '#ec4899'
+          )
+        }
+      )
+    }
+
+    /* =====================================================
+       TEMPLATE 11
+       DARK
+    ===================================================== */
+
+    else if (
+      templateLayout === 'dark'
+    ) {
+      drawBackground(
+        ctx,
+        W,
+        H,
+        '#09090b',
+        '#18181b'
+      )
+
+      drawText(
+        ctx,
+        templateTitle,
+        600,
+        110,
+        68,
+        '#ffffff',
+        '700',
+        'Georgia'
+      )
+
+      drawText(
+        ctx,
+        templateSubtitle,
+        600,
+        165,
+        20,
+        '#a1a1aa'
+      )
+
+      const photoW = 650
+      const photoH = 390
+
+      const x = 275
+
+      let y = 230
+
+      images.forEach(
+        (img, index) => {
+
+          ctx.fillStyle =
+            '#27272a'
+
+          roundedRect(
+            ctx,
+            x - 10,
+            y - 10,
+            photoW + 20,
+            photoH + 20,
+            20
+          )
+
+          ctx.fill()
+
+          drawPhotoContain(
+            ctx,
+            img,
+            x,
+            y,
+            photoW,
+            photoH,
+            14,
+            '#27272a'
+          )
+
+          photoNumber(
+            ctx,
+            index + 1,
+            600,
+            y + photoH + 35,
+            '#d4d4d8'
+          )
+
+          y += 490
+        }
+      )
+
+      star(
+        ctx,
+        600,
+        2130,
+        40,
+        '#ffffff'
+      )
+    }
+
+    /* =====================================================
+       TEMPLATE 12
+       CLASSIC
+    ===================================================== */
+
+    else {
+      drawBackground(
+        ctx,
+        W,
+        H,
+        '#f8fafc',
+        '#e2e8f0'
+      )
+
+      drawText(
+        ctx,
+        templateTitle,
+        600,
+        100,
+        62,
+        '#18181b',
+        '700',
+        'Georgia'
+      )
+
+      drawText(
+        ctx,
+        templateSubtitle,
+        600,
+        155,
+        20,
+        '#64748b'
+      )
+
+      const photoW = 620
+      const photoH = 410
+
+      const x = 290
+
+      let y = 240
+
+      images.forEach(
+        (img, index) => {
+
+          drawFrame(
+            ctx,
+            x - 15,
+            y - 15,
+            photoW + 30,
+            photoH + 30,
+            18
+          )
+
+          drawPhotoContain(
+            ctx,
+            img,
+            x,
+            y,
+            photoW,
+            photoH,
+            10,
+            '#f1f5f9'
+          )
+
+          photoNumber(
+            ctx,
+            index + 1,
+            600,
+            y + photoH + 40,
+            '#475569'
+          )
+
+          y += 500
+        }
+      )
+
+      drawText(
+        ctx,
+        'CAPTURED MOMENTS',
+        600,
+        2130,
+        18,
+        '#64748b',
+        '400'
+      )
+    }
+
+    /* =====================================================
+       EXPORT JPG
+    ===================================================== */
+
+    resultUrl.value =
+      canvas.value.toDataURL(
+        'image/jpeg',
+        0.95
+      )
+
+    loading.value = false
+
+    await nextTick()
+
+  } catch (error) {
+
+    console.error(
+      'Generate error:',
+      error
+    )
+
+    errorMessage.value =
+      'Gagal membuat hasil foto.'
+
+    loading.value = false
   }
 }
 
-onMounted(() => {
-  startCamera()
-})
+/* =========================================================
+   DOWNLOAD
+========================================================= */
 
-onBeforeUnmount(() => {
-  stopCamera()
+const download = () => {
+  if (!resultUrl.value) {
+    return
+  }
+
+  try {
+
+    const link =
+      document.createElement('a')
+
+    link.href =
+      resultUrl.value
+
+    link.download =
+      `photobooth-${templateName
+        .toLowerCase()
+        .replace(/\s+/g, '-')}.jpg`
+
+    document.body.appendChild(
+      link
+    )
+
+    link.click()
+
+    document.body.removeChild(
+      link
+    )
+
+  } catch (error) {
+
+    console.error(
+      'Download gagal:',
+      error
+    )
+
+    openImage()
+  }
+}
+
+/* =========================================================
+   OPEN IMAGE
+   FALLBACK UNTUK HP
+========================================================= */
+
+const openImage = () => {
+  if (!resultUrl.value) {
+    return
+  }
+
+  const newWindow =
+    window.open(
+      '',
+      '_blank'
+    )
+
+  if (newWindow) {
+
+    newWindow.document.write(`
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Photobooth Result</title>
+        <meta name="viewport"
+              content="width=device-width, initial-scale=1">
+        <style>
+          body {
+            margin: 0;
+            padding: 20px;
+            background: #111;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 20px;
+            font-family: Arial;
+          }
+
+          img {
+            max-width: 100%;
+            height: auto;
+            display: block;
+          }
+
+          p {
+            color: white;
+            text-align: center;
+          }
+        </style>
+      </head>
+
+      <body>
+
+        <img
+          src="${resultUrl.value}"
+          alt="Photobooth Result"
+        >
+
+        <p>
+          Tekan lama gambar lalu pilih
+          <b>Simpan gambar</b>.
+        </p>
+
+      </body>
+      </html>
+    `)
+
+    newWindow.document.close()
+
+  } else {
+
+    alert(
+      'Browser memblokir halaman baru. Tekan tombol Download lagi.'
+    )
+  }
+}
+
+/* =========================================================
+   SHARE
+========================================================= */
+
+const shareImage = async () => {
+  if (!resultUrl.value) {
+    return
+  }
+
+  try {
+
+    const response =
+      await fetch(
+        resultUrl.value
+      )
+
+    const blob =
+      await response.blob()
+
+    const file =
+      new File(
+        [blob],
+        'photobooth.jpg',
+        {
+          type: 'image/jpeg'
+        }
+      )
+
+    if (
+      navigator.share &&
+      navigator.canShare &&
+      navigator.canShare({
+        files: [file]
+      })
+    ) {
+
+      await navigator.share({
+        title: 'Photobooth',
+        text: 'Hasil foto photobooth',
+        files: [file]
+      })
+
+    } else {
+
+      openImage()
+    }
+
+  } catch (error) {
+
+    console.error(
+      'Share error:',
+      error
+    )
+  }
+}
+
+/* =========================================================
+   RETAKE
+========================================================= */
+
+const retake = () => {
+
+  localStorage.removeItem(
+    'photobooth_photos'
+  )
+
+  navigateTo(
+    `/camera?template=${templateId}`
+  )
+}
+
+/* =========================================================
+   HOME
+========================================================= */
+
+const home = () => {
+
+  localStorage.removeItem(
+    'photobooth_photos'
+  )
+
+  navigateTo('/')
+}
+
+/* =========================================================
+   LOAD
+========================================================= */
+
+onMounted(async () => {
+
+  try {
+
+    const saved =
+      localStorage.getItem(
+        'photobooth_photos'
+      )
+
+    if (saved) {
+
+      const parsed =
+        JSON.parse(saved)
+
+      if (
+        Array.isArray(parsed)
+      ) {
+
+        photos.value =
+          parsed.filter(
+            (photo) =>
+              typeof photo ===
+              'string'
+          )
+      }
+    }
+
+    if (
+      photos.value.length > 0
+    ) {
+
+      await generate()
+
+    } else {
+
+      loading.value = false
+    }
+
+  } catch (error) {
+
+    console.error(
+      'Load error:',
+      error
+    )
+
+    loading.value = false
+  }
 })
 </script>
 
 <template>
   <div class="page">
 
-    <!-- HEADER -->
+    <!-- =====================================================
+         HEADER
+    ====================================================== -->
 
     <header class="header">
-      <div>
-        <h1>📸 PhotoBooth</h1>
-        <p>Buat foto kerenmu sendiri</p>
+
+      <button
+        class="home-btn"
+        @click="home"
+      >
+        <span>←</span>
+        <span>Home</span>
+      </button>
+
+      <div class="brand">
+        <span class="brand-icon">
+          📸
+        </span>
+
+        <span>
+          Photobooth
+        </span>
       </div>
 
-      <div class="badge">
-        {{ photos.length }}/4 Foto
+      <div class="template-badge">
+        {{ templateName }}
       </div>
+
     </header>
 
-    <!-- MAIN -->
 
-    <main class="container">
+    <!-- =====================================================
+         MAIN
+    ====================================================== -->
 
-      <!-- CAMERA -->
+    <main class="main">
 
-      <section class="camera-card">
+      <section class="heading">
 
-        <div class="camera">
-
-          <video
-            ref="video"
-            autoplay
-            playsinline
-            muted
-          ></video>
-
-          <div
-            v-if="countdown > 0"
-            class="countdown"
-          >
-            {{ countdown }}
-          </div>
-
-          <div
-            v-if="!cameraActive"
-            class="camera-off"
-          >
-            <div>📷</div>
-            <p>Kamera belum aktif</p>
-
-            <button
-              class="primary"
-              @click="startCamera"
-            >
-              Aktifkan Kamera
-            </button>
-          </div>
-
+        <div class="eyebrow">
+          YOUR RESULT
         </div>
 
-        <div class="camera-actions">
+        <h1>
+          {{ templateTitle }}
+        </h1>
 
-          <button
-            class="primary big"
-            :disabled="capturing"
-            @click="takePhotos"
-          >
-            {{ capturing ? '📸 Mengambil Foto...' : '📸 Ambil 4 Foto' }}
-          </button>
-
-          <button
-            class="secondary"
-            @click="resetPhotos"
-          >
-            🔄 Ulangi
-          </button>
-
-        </div>
-
-        <input
-          v-model="name"
-          class="name-input"
-          placeholder="Masukkan nama / judul foto"
-          @input="drawPreview"
-        />
+        <p>
+          {{ templateSubtitle }}
+        </p>
 
       </section>
 
-      <!-- TEMPLATE -->
 
-      <section class="template-section">
+      <!-- ===================================================
+           ERROR
+      ==================================================== -->
 
-        <div class="section-title">
-          <h2>✨ Pilih Template</h2>
-          <span>12 pilihan</span>
-        </div>
+      <div
+        v-if="errorMessage"
+        class="error-box"
+      >
+        {{ errorMessage }}
 
-        <div class="templates">
+        <button
+          @click="generate"
+        >
+          Coba Lagi
+        </button>
+      </div>
 
-          <button
-            v-for="template in templates"
-            :key="template.id"
-            class="template"
-            :class="{
-              active: selectedTemplate === template.id
-            }"
-            @click="selectTemplate(template.id)"
-          >
 
-            <div
-              class="template-preview"
-              :style="{
-                background: template.bg,
-                color: template.text
-              }"
-            >
+      <!-- ===================================================
+           LOADING
+      ==================================================== -->
 
-              <div class="mini-title">
-                {{ template.name }}
-              </div>
+      <div
+        v-else-if="loading"
+        class="loading"
+      >
 
-              <div class="mini-grid">
+        <div class="spinner"></div>
 
-                <div
-                  v-for="n in 4"
-                  :key="n"
-                  class="mini-photo"
-                  :style="{
-                    background: template.accent
-                  }"
-                >
-                  <span>📷</span>
-                </div>
+        <h3>
+          Membuat hasil foto...
+        </h3>
 
-              </div>
+        <p>
+          Tunggu sebentar ya
+        </p>
 
-              <div class="mini-footer">
-                {{ name || 'PHOTOBOOTH' }}
-              </div>
+      </div>
 
-            </div>
 
-            <div class="template-name">
-              {{ template.name }}
-            </div>
-
-          </button>
-
-        </div>
-
-      </section>
-
-      <!-- RESULT -->
+      <!-- ===================================================
+           RESULT
+      ==================================================== -->
 
       <section
-        v-if="photos.length === 4"
+        v-else-if="resultUrl"
         class="result"
       >
 
-        <div class="result-header">
+        <div class="result-card">
 
-          <div>
-            <h2>🎉 Hasil Foto</h2>
-            <p>
-              Template:
-              <strong>
-                {{ currentTemplate().name }}
-              </strong>
-            </p>
-          </div>
+          <img
+            :src="resultUrl"
+            class="result-image"
+            alt="Hasil Photobooth"
+          />
+
+        </div>
+
+
+        <!-- =================================================
+             ACTION BUTTON
+        ================================================== -->
+
+        <div class="actions">
 
           <button
-            class="download"
-            @click="downloadPhoto"
+            class="btn primary"
+            @click="download"
           >
-            ⬇️ Download Foto
+            <span>⬇</span>
+            Download JPG
+          </button>
+
+          <button
+            class="btn secondary"
+            @click="openImage"
+          >
+            <span>🖼️</span>
+            Buka Gambar
+          </button>
+
+          <button
+            class="btn secondary"
+            @click="shareImage"
+          >
+            <span>↗</span>
+            Bagikan
+          </button>
+
+          <button
+            class="btn outline"
+            @click="retake"
+          >
+            <span>📸</span>
+            Foto Lagi
           </button>
 
         </div>
 
-        <div class="canvas-wrapper">
-          <canvas
-            ref="previewCanvas"
-          ></canvas>
+
+        <div class="info">
+
+          <span class="info-icon">
+            ✓
+          </span>
+
+          <span>
+            Hasil sudah digabung menjadi
+            <strong>1 gambar JPG</strong>
+          </span>
+
         </div>
 
-        <p class="download-info">
-          Hasil download menggunakan ukuran portrait 1080 × 1600 px.
+      </section>
+
+
+      <!-- ===================================================
+           EMPTY
+      ==================================================== -->
+
+      <section
+        v-else
+        class="empty"
+      >
+
+        <div class="empty-icon">
+          📷
+        </div>
+
+        <h2>
+          Belum ada foto
+        </h2>
+
+        <p>
+          Ambil foto terlebih dahulu
         </p>
+
+        <button
+          class="btn primary"
+          @click="retake"
+        >
+          📸 Ambil Foto
+        </button>
 
       </section>
 
     </main>
 
-    <footer>
-      <p>
-        📸 PhotoBooth • Buat dan simpan momen terbaikmu
-      </p>
-    </footer>
+
+    <!-- =====================================================
+         HIDDEN CANVAS
+    ====================================================== -->
+
+    <canvas
+      ref="canvas"
+      class="hidden-canvas"
+    />
 
   </div>
 </template>
 
+
 <style scoped>
+
+/* =========================================================
+   RESET
+========================================================= */
 
 * {
   box-sizing: border-box;
 }
 
+
+/* =========================================================
+   PAGE
+========================================================= */
+
 .page {
   min-height: 100vh;
+
   background:
     radial-gradient(
-      circle at top,
-      #fdf2f8,
-      #f8fafc 45%,
-      #eef2ff
-    );
+      circle at top left,
+      rgba(236,72,153,.08),
+      transparent 35%
+    ),
+    #fafafa;
+
   color: #18181b;
+
   font-family:
     Inter,
     ui-sans-serif,
@@ -1516,431 +2256,694 @@ onBeforeUnmount(() => {
     sans-serif;
 }
 
-/* HEADER */
+
+/* =========================================================
+   HEADER
+========================================================= */
 
 .header {
-  width: min(1200px, 94%);
-  margin: auto;
-  padding: 30px 0 20px;
+  position: sticky;
+  top: 0;
+  z-index: 50;
+
+  height: 72px;
 
   display: flex;
   align-items: center;
   justify-content: space-between;
+
+  padding: 0 5%;
+
+  background:
+    rgba(255,255,255,.92);
+
+  backdrop-filter:
+    blur(18px);
+
+  border-bottom:
+    1px solid #e4e4e7;
 }
 
-.header h1 {
-  margin: 0;
-  font-size: 32px;
-  font-weight: 800;
-}
 
-.header p {
-  margin: 5px 0 0;
-  color: #71717a;
-}
-
-.badge {
-  padding: 10px 18px;
-  border-radius: 999px;
-  background: white;
-  border: 1px solid #e4e4e7;
-  font-weight: 700;
-}
-
-/* CONTAINER */
-
-.container {
-  width: min(1200px, 94%);
-  margin: auto;
-}
-
-/* CAMERA */
-
-.camera-card {
-  background: rgba(255, 255, 255, .85);
-  border: 1px solid #e4e4e7;
-  border-radius: 28px;
-  padding: 22px;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, .08);
-}
-
-.camera {
-  position: relative;
-  overflow: hidden;
-  width: 100%;
-  aspect-ratio: 16 / 9;
-  border-radius: 22px;
-  background: #09090b;
-}
-
-.camera video {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-
-  /*
-    Selfie mirror
-  */
-  transform: scaleX(-1);
-}
-
-.countdown {
-  position: absolute;
-  inset: 0;
-
-  display: grid;
-  place-items: center;
-
-  font-size: clamp(100px, 20vw, 220px);
-  font-weight: 900;
-
-  color: white;
-  text-shadow:
-    0 5px 30px rgba(0, 0, 0, .5);
-}
-
-.camera-off {
-  position: absolute;
-  inset: 0;
-
+.home-btn {
   display: flex;
   align-items: center;
-  justify-content: center;
-  flex-direction: column;
+  gap: 8px;
 
-  color: white;
-}
-
-.camera-off div {
-  font-size: 70px;
-}
-
-.camera-off p {
-  margin: 10px 0 20px;
-}
-
-/* ACTION */
-
-.camera-actions {
-  display: flex;
-  gap: 12px;
-  margin-top: 18px;
-}
-
-button {
   border: 0;
+
+  background: transparent;
+
+  color: #52525b;
+
+  font-size: 15px;
+
+  font-weight: 700;
+
   cursor: pointer;
-  font-family: inherit;
+
+  transition:
+    .2s ease;
 }
 
-.primary {
-  background: #ec4899;
-  color: white;
-  padding: 13px 22px;
-  border-radius: 14px;
-  font-weight: 700;
 
-  box-shadow:
-    0 10px 25px rgba(236, 72, 153, .25);
-
-  transition: .2s;
+.home-btn:hover {
+  color: #7c3aed;
 }
 
-.primary:hover {
-  transform: translateY(-2px);
-  background: #db2777;
+
+.home-btn span:first-child {
+  font-size: 22px;
 }
 
-.primary:disabled {
-  opacity: .5;
-  cursor: not-allowed;
-  transform: none;
-}
 
-.big {
-  flex: 1;
-  font-size: 17px;
-}
-
-.secondary {
-  padding: 13px 22px;
-  border-radius: 14px;
-  background: #f4f4f5;
-  color: #18181b;
-  font-weight: 700;
-}
-
-.name-input {
-  width: 100%;
-  margin-top: 14px;
-
-  border: 1px solid #e4e4e7;
-  border-radius: 14px;
-  padding: 14px 16px;
-
-  font-size: 16px;
-  outline: none;
-}
-
-.name-input:focus {
-  border-color: #ec4899;
-}
-
-/* TEMPLATE */
-
-.template-section {
-  margin-top: 30px;
-}
-
-.section-title {
+.brand {
   display: flex;
-  justify-content: space-between;
   align-items: center;
+  gap: 8px;
 
-  margin-bottom: 16px;
-}
+  color: #7c3aed;
 
-.section-title h2 {
-  margin: 0;
-  font-size: 25px;
-}
+  font-size: 20px;
 
-.section-title span {
-  color: #71717a;
-}
-
-/* TEMPLATE GRID */
-
-.templates {
-  display: grid;
-
-  grid-template-columns:
-    repeat(4, minmax(0, 1fr));
-
-  gap: 16px;
-}
-
-.template {
-  padding: 8px;
-  background: white;
-
-  border: 2px solid transparent;
-  border-radius: 18px;
-
-  transition: .2s;
-}
-
-.template:hover {
-  transform: translateY(-4px);
-  box-shadow: 0 15px 30px rgba(0, 0, 0, .08);
-}
-
-.template.active {
-  border-color: #ec4899;
-}
-
-/* MINI PREVIEW */
-
-.template-preview {
-  aspect-ratio: 3 / 4;
-
-  border-radius: 13px;
-  padding: 10px;
-
-  overflow: hidden;
-}
-
-.mini-title {
-  font-size: 11px;
   font-weight: 900;
+}
+
+
+.brand-icon {
+  font-size: 24px;
+}
+
+
+.template-badge {
+  padding:
+    8px 14px;
+
+  border-radius:
+    999px;
+
+  background:
+    #f5f3ff;
+
+  color:
+    #7c3aed;
+
+  font-size:
+    12px;
+
+  font-weight:
+    800;
+}
+
+
+/* =========================================================
+   MAIN
+========================================================= */
+
+.main {
+  width: 92%;
+  max-width: 850px;
+
+  margin: auto;
+
+  padding:
+    55px 0 100px;
+}
+
+
+/* =========================================================
+   HEADING
+========================================================= */
+
+.heading {
   text-align: center;
-  margin-bottom: 8px;
+
+  margin-bottom:
+    35px;
 }
 
-.mini-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 6px;
+
+.eyebrow {
+  display: inline-block;
+
+  color:
+    #7c3aed;
+
+  font-size:
+    11px;
+
+  font-weight:
+    900;
+
+  letter-spacing:
+    3px;
+
+  margin-bottom:
+    10px;
 }
 
-.mini-photo {
-  aspect-ratio: 1 / 1;
 
-  display: grid;
-  place-items: center;
+.heading h1 {
+  margin:
+    0 0 10px;
 
-  border-radius: 5px;
+  font-size:
+    clamp(30px, 5vw, 52px);
 
-  opacity: .65;
+  line-height:
+    1.1;
+
+  font-family:
+    Georgia,
+    serif;
 }
 
-.mini-photo span {
-  font-size: 13px;
-  filter: grayscale(1);
+
+.heading p {
+  margin:
+    0;
+
+  color:
+    #71717a;
+
+  font-size:
+    16px;
 }
 
-.mini-footer {
-  margin-top: 8px;
 
-  font-size: 8px;
-  text-align: center;
-}
+/* =========================================================
+   RESULT CARD
+========================================================= */
 
-/* TEMPLATE NAME */
-
-.template-name {
-  padding: 9px 3px 4px;
-
-  font-size: 13px;
-  font-weight: 700;
-
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-/* RESULT */
-
-.result {
-  margin-top: 40px;
-
-  background: white;
-  border: 1px solid #e4e4e7;
-  border-radius: 28px;
-
-  padding: 24px;
-
-  box-shadow:
-    0 20px 60px rgba(0, 0, 0, .07);
-}
-
-.result-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-
-  margin-bottom: 25px;
-}
-
-.result-header h2 {
-  margin: 0;
-  font-size: 25px;
-}
-
-.result-header p {
-  color: #71717a;
-}
-
-.download {
-  padding: 14px 22px;
-
-  border-radius: 14px;
-
-  background: #18181b;
-  color: white;
-
-  font-weight: 800;
-
-  transition: .2s;
-}
-
-.download:hover {
-  transform: translateY(-2px);
-  background: #27272a;
-}
-
-/* CANVAS */
-
-.canvas-wrapper {
-  display: flex;
-  justify-content: center;
-
+.result-card {
   width: 100%;
-  padding: 20px;
 
-  background: #f4f4f5;
-  border-radius: 20px;
-}
+  max-width:
+    680px;
 
-.canvas-wrapper canvas {
-  width: min(100%, 540px);
-  height: auto;
+  margin:
+    0 auto;
 
-  display: block;
+  padding:
+    14px;
 
-  border-radius: 4px;
+  background:
+    #ffffff;
+
+  border:
+    1px solid #e4e4e7;
+
+  border-radius:
+    26px;
 
   box-shadow:
-    0 20px 50px rgba(0, 0, 0, .2);
+    0 25px 70px
+    rgba(0,0,0,.12);
 }
 
-.download-info {
-  text-align: center;
-  color: #71717a;
-  font-size: 14px;
+
+.result-image {
+  display:
+    block;
+
+  width:
+    100%;
+
+  height:
+    auto;
+
+  border-radius:
+    17px;
 }
 
-/* FOOTER */
 
-footer {
-  text-align: center;
-  padding: 40px 20px;
-  color: #71717a;
+/* =========================================================
+   ACTIONS
+========================================================= */
+
+.actions {
+  display:
+    flex;
+
+  flex-wrap:
+    wrap;
+
+  justify-content:
+    center;
+
+  gap:
+    12px;
+
+  margin-top:
+    25px;
 }
 
-/* MOBILE */
 
-@media (max-width: 800px) {
+.btn {
+  min-height:
+    52px;
+
+  padding:
+    0 23px;
+
+  border-radius:
+    14px;
+
+  border:
+    1px solid transparent;
+
+  font-size:
+    14px;
+
+  font-weight:
+    800;
+
+  cursor:
+    pointer;
+
+  display:
+    flex;
+
+  align-items:
+    center;
+
+  justify-content:
+    center;
+
+  gap:
+    8px;
+
+  transition:
+    transform .2s ease,
+    box-shadow .2s ease;
+}
+
+
+.btn:hover {
+  transform:
+    translateY(-2px);
+}
+
+
+.btn.primary {
+  background:
+    linear-gradient(
+      135deg,
+      #7c3aed,
+      #db2777
+    );
+
+  color:
+    #ffffff;
+
+  box-shadow:
+    0 12px 30px
+    rgba(124,58,237,.25);
+}
+
+
+.btn.secondary {
+  background:
+    #ffffff;
+
+  color:
+    #3f3f46;
+
+  border-color:
+    #e4e4e7;
+}
+
+
+.btn.outline {
+  background:
+    transparent;
+
+  color:
+    #52525b;
+
+  border-color:
+    #d4d4d8;
+}
+
+
+/* =========================================================
+   INFO
+========================================================= */
+
+.info {
+  margin-top:
+    20px;
+
+  display:
+    flex;
+
+  justify-content:
+    center;
+
+  align-items:
+    center;
+
+  gap:
+    8px;
+
+  color:
+    #71717a;
+
+  font-size:
+    13px;
+
+  text-align:
+    center;
+}
+
+
+.info strong {
+  color:
+    #52525b;
+}
+
+
+.info-icon {
+  width:
+    20px;
+
+  height:
+    20px;
+
+  display:
+    inline-flex;
+
+  align-items:
+    center;
+
+  justify-content:
+    center;
+
+  border-radius:
+    50%;
+
+  background:
+    #dcfce7;
+
+  color:
+    #16a34a;
+
+  font-size:
+    11px;
+
+  font-weight:
+    900;
+}
+
+
+/* =========================================================
+   LOADING
+========================================================= */
+
+.loading {
+  min-height:
+    400px;
+
+  display:
+    flex;
+
+  flex-direction:
+    column;
+
+  align-items:
+    center;
+
+  justify-content:
+    center;
+
+  text-align:
+    center;
+
+  background:
+    #ffffff;
+
+  border:
+    1px solid #e4e4e7;
+
+  border-radius:
+    25px;
+}
+
+
+.loading h3 {
+  margin:
+    20px 0 5px;
+}
+
+
+.loading p {
+  margin:
+    0;
+
+  color:
+    #71717a;
+}
+
+
+.spinner {
+  width:
+    48px;
+
+  height:
+    48px;
+
+  border:
+    4px solid #e4e4e7;
+
+  border-top-color:
+    #7c3aed;
+
+  border-radius:
+    50%;
+
+  animation:
+    spin .8s linear infinite;
+}
+
+
+@keyframes spin {
+
+  to {
+    transform:
+      rotate(360deg);
+  }
+
+}
+
+
+/* =========================================================
+   EMPTY
+========================================================= */
+
+.empty {
+  padding:
+    80px 30px;
+
+  text-align:
+    center;
+
+  background:
+    #ffffff;
+
+  border:
+    1px solid #e4e4e7;
+
+  border-radius:
+    25px;
+}
+
+
+.empty-icon {
+  font-size:
+    60px;
+
+  margin-bottom:
+    15px;
+}
+
+
+.empty h2 {
+  margin:
+    0 0 8px;
+}
+
+
+.empty p {
+  color:
+    #71717a;
+
+  margin:
+    0 0 25px;
+}
+
+
+/* =========================================================
+   ERROR
+========================================================= */
+
+.error-box {
+  padding:
+    35px;
+
+  background:
+    #fff1f2;
+
+  color:
+    #be123c;
+
+  border:
+    1px solid #fecdd3;
+
+  border-radius:
+    20px;
+
+  text-align:
+    center;
+}
+
+
+.error-box button {
+  display:
+    block;
+
+  margin:
+    20px auto 0;
+
+  padding:
+    10px 18px;
+
+  border:
+    0;
+
+  border-radius:
+    10px;
+
+  background:
+    #be123c;
+
+  color:
+    white;
+
+  font-weight:
+    700;
+
+  cursor:
+    pointer;
+}
+
+
+/* =========================================================
+   CANVAS
+========================================================= */
+
+.hidden-canvas {
+  display:
+    none;
+}
+
+
+/* =========================================================
+   MOBILE
+========================================================= */
+
+@media (max-width: 600px) {
 
   .header {
-    padding-top: 20px;
+    height:
+      64px;
+
+    padding:
+      0 16px;
   }
 
-  .header h1 {
-    font-size: 25px;
+
+  .brand {
+    font-size:
+      17px;
   }
 
-  .templates {
-    grid-template-columns:
-      repeat(2, minmax(0, 1fr));
+
+  .brand-icon {
+    font-size:
+      20px;
   }
 
-  .camera-actions {
-    flex-direction: column;
+
+  .template-badge {
+    display:
+      none;
   }
 
-  .result-header {
-    flex-direction: column;
-    align-items: stretch;
-    gap: 15px;
+
+  .main {
+    width:
+      94%;
+
+    padding:
+      30px 0 70px;
   }
 
-  .download {
-    width: 100%;
+
+  .heading {
+    margin-bottom:
+      24px;
   }
 
-  .camera-card,
-  .result {
-    padding: 15px;
-    border-radius: 20px;
+
+  .heading h1 {
+    font-size:
+      31px;
+  }
+
+
+  .heading p {
+    font-size:
+      14px;
+  }
+
+
+  .result-card {
+    padding:
+      8px;
+
+    border-radius:
+      20px;
+  }
+
+
+  .result-image {
+    border-radius:
+      13px;
+  }
+
+
+  .actions {
+    flex-direction:
+      column;
+
+    gap:
+      10px;
+  }
+
+
+  .btn {
+    width:
+      100%;
+  }
+
+
+  .info {
+    line-height:
+      1.5;
+
+    padding:
+      0 10px;
   }
 
 }
-
-@media (max-width: 450px) {
-
-  .templates {
-    gap: 10px;
-  }
-
-  .template {
-    padding: 5px;
-  }
-
-  .template-name {
-    font-size: 11px;
-  }
-
-}
-
 </style>
