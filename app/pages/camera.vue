@@ -53,7 +53,7 @@ const totalPhotos = computed(() => {
 })
 
 const progress = computed(() => {
-  return `${Math.min(currentPhoto.value, totalPhotos.value)}/${totalPhotos.value}`
+  return `${Math.min(currentPhoto.value, totalPhotos)}/${totalPhotos}`
 })
 
 // =====================================================
@@ -277,7 +277,7 @@ const capturePhoto = async () => {
   }
 
   if (
-    photos.value.length >= totalPhotos.value
+    photos.value.length >= totalPhotos
   ) {
     goToResult()
     return
@@ -355,9 +355,9 @@ const capturePhoto = async () => {
 
   isTakingPhoto.value = false
 
-  // Kalau jumlah foto sudah sesuai template
+  // Kalau jumlah foto sesuai template sudah selesai
   if (
-    photos.value.length >= totalPhotos.value
+    photos.value.length >= totalPhotos
   ) {
     await wait(700)
 
