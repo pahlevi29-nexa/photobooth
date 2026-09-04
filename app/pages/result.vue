@@ -1,204 +1,149 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, nextTick } from 'vue'
 import { templates } from '~/data/templates'
 
 const route = useRoute()
 
 const templateId = Number(route.query.template || 1)
 
-const selectedTemplate = templates.find(
-  (t: any) => Number(t.id) === templateId
-) || templates[0]
-
-/*
-|--------------------------------------------------------------------------
-| TEMPLATE YANG AMAN
-|--------------------------------------------------------------------------
-| Mencegah munculnya "undefined"
-*/
-const template: any = {
-  id: selectedTemplate?.id || 1,
-  name: selectedTemplate?.name || 'Photobooth',
-  title: selectedTemplate?.title || selectedTemplate?.name || 'Memories',
-  subtitle:
-    selectedTemplate?.subtitle ||
-    'Captured moments',
-  layout:
-    selectedTemplate?.layout || 'vertical',
-  colors:
-    selectedTemplate?.colors || ['#fce7f3', '#fbcfe8']
-}
+const template =
+  templates.find((t: any) => Number(t.id) === templateId) ||
+  templates[0]
 
 const photos = ref<string[]>([])
 const resultUrl = ref('')
 const loading = ref(true)
+const errorMessage = ref('')
+
 const canvas = ref<HTMLCanvasElement | null>(null)
 
-/*
-|--------------------------------------------------------------------------
-| LOAD FOTO
-|--------------------------------------------------------------------------
-*/
-onMounted(async () => {
-  const saved = localStorage.getItem('photobooth_photos')
+/* =========================================================
+   LOAD PHOTO
+========================================================= */
 
-  if (saved) {
-    try {
-      const parsed = JSON.parse(saved)
-
-      if (Array.isArray(parsed)) {
-        photos.value = parsed.filter(
-          (photo) => typeof photo === 'string'
-        )
-      }
-    } catch {
-      photos.value = []
-    }
-  }
-
-  if (photos.value.length > 0) {
-    await generate()
-  } else {
-    loading.value = false
-  }
-})
-
-/*
-|--------------------------------------------------------------------------
-| LOAD IMAGE
-|--------------------------------------------------------------------------
-*/
-const loadImage = (
-  src: string
-): Promise<HTMLImageElement> => {
+const loadImage = (src: string): Promise<HTMLImageElement> => {
   return new Promise((resolve, reject) => {
     const img = new Image()
 
     img.onload = () => resolve(img)
-    img.onerror = () =>
-      reject(new Error('Gagal memuat foto'))
+    img.onerror = () => reject(new Error('Gagal memuat foto'))
 
     img.src = src
   })
 }
 
-/*
-|--------------------------------------------------------------------------
-| FIT IMAGE
-|--------------------------------------------------------------------------
-| PENTING:
-| Tidak menggunakan crop.
-|
-| Foto akan masuk ke dalam frame dengan rasio asli.
-| Jadi wajah tidak terpotong.
-|--------------------------------------------------------------------------
-*/
-const fitImage = (
+/* =========================================================
+   DRAW IMAGE COVER
+   Sama seperti object-fit: cover
+========================================================= */
+
+const drawCover = (
   ctx: CanvasRenderingContext2D,
   img: HTMLImageElement,
   x: number,
   y: number,
-  w: number,
-  h: number,
-  backgroundColor = '#ffffff'
+  width: number,
+  height: number,
+  radius = 0
 ) => {
-  const imageRatio = img.width / img.height
-  const boxRatio = w / h
+  const sourceRatio = img.width / img.height
+  const targetRatio = width / height
 
-  let drawWidth = w
-  let drawHeight = h
+  let sx = 0
+  let sy = 0
+  let sw = img.width
+  let sh = img.height
 
-  if (imageRatio > boxRatio) {
-    drawWidth = w
-    drawHeight = w / imageRatio
+  if (sourceRatio > targetRatio) {
+    // Foto terlalu lebar -> potong kiri kanan
+    sw = img.height * targetRatio
+    sx = (img.width - sw) / 2
   } else {
-    drawHeight = h
-    drawWidth = h * imageRatio
+    // Foto terlalu tinggi -> potong atas bawah
+    sh = img.width / targetRatio
+    sy = (img.height - sh) / 2
   }
 
-  const drawX =
-    x + (w - drawWidth) / 2
+  ctx.save()
 
-  const drawY =
-    y + (h - drawHeight) / 2
-
-  // background frame
-  ctx.fillStyle = backgroundColor
-  ctx.fillRect(x, y, w, h)
+  if (radius > 0) {
+    roundedRect(ctx, x, y, width, height, radius)
+    ctx.clip()
+  }
 
   ctx.drawImage(
     img,
-    drawX,
-    drawY,
-    drawWidth,
-    drawHeight
+    sx,
+    sy,
+    sw,
+    sh,
+    x,
+    y,
+    width,
+    height
   )
-}
-
-/*
-|--------------------------------------------------------------------------
-| FIT IMAGE DENGAN BORDER
-|--------------------------------------------------------------------------
-*/
-const photoFrame = (
-  ctx: CanvasRenderingContext2D,
-  img: HTMLImageElement,
-  x: number,
-  y: number,
-  w: number,
-  h: number,
-  radius = 0
-) => {
-  ctx.save()
-
-  ctx.fillStyle = '#ffffff'
-
-  if (radius > 0) {
-    ctx.beginPath()
-    ctx.roundRect(x, y, w, h, radius)
-    ctx.fill()
-
-    ctx.beginPath()
-    ctx.roundRect(
-      x + 12,
-      y + 12,
-      w - 24,
-      h - 24,
-      Math.max(radius - 8, 0)
-    )
-    ctx.clip()
-
-    fitImage(
-      ctx,
-      img,
-      x + 12,
-      y + 12,
-      w - 24,
-      h - 24,
-      '#f4f4f5'
-    )
-  } else {
-    ctx.fillRect(x, y, w, h)
-
-    fitImage(
-      ctx,
-      img,
-      x + 12,
-      y + 12,
-      w - 24,
-      h - 24,
-      '#f4f4f5'
-    )
-  }
 
   ctx.restore()
 }
 
-/*
-|--------------------------------------------------------------------------
-| TEXT
-|--------------------------------------------------------------------------
-*/
+/* =========================================================
+   ROUNDED RECTANGLE
+========================================================= */
+
+const roundedRect = (
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  radius: number
+) => {
+  const r = Math.min(radius, width / 2, height / 2)
+
+  ctx.beginPath()
+  ctx.moveTo(x + r, y)
+  ctx.lineTo(x + width - r, y)
+  ctx.quadraticCurveTo(
+    x + width,
+    y,
+    x + width,
+    y + r
+  )
+
+  ctx.lineTo(x + width, y + height - r)
+
+  ctx.quadraticCurveTo(
+    x + width,
+    y + height,
+    x + width - r,
+    y + height
+  )
+
+  ctx.lineTo(x + r, y + height)
+
+  ctx.quadraticCurveTo(
+    x,
+    y + height,
+    x,
+    y + height - r
+  )
+
+  ctx.lineTo(x, y + r)
+
+  ctx.quadraticCurveTo(
+    x,
+    y,
+    x + r,
+    y
+  )
+
+  ctx.closePath()
+}
+
+/* =========================================================
+   TEXT
+========================================================= */
+
 const drawText = (
   ctx: CanvasRenderingContext2D,
   value: string,
@@ -206,1051 +151,1224 @@ const drawText = (
   y: number,
   size: number,
   color: string,
-  weight = 'bold',
+  weight = '700',
   font = 'Arial'
 ) => {
   ctx.fillStyle = color
   ctx.font = `${weight} ${size}px ${font}`
   ctx.textAlign = 'center'
-  ctx.textBaseline = 'middle'
+  ctx.textBaseline = 'alphabetic'
 
-  ctx.fillText(
-    String(value || ''),
-    x,
-    y
-  )
+  ctx.fillText(value, x, y)
 }
 
-/*
-|--------------------------------------------------------------------------
-| BACKGROUND
-|--------------------------------------------------------------------------
-*/
+/* =========================================================
+   BACKGROUND
+========================================================= */
+
 const drawBackground = (
   ctx: CanvasRenderingContext2D,
   width: number,
   height: number
 ) => {
-  const color1 =
-    template.colors?.[0] || '#fce7f3'
+  const colors = template?.colors || [
+    '#fdf2f8',
+    '#fbcfe8'
+  ]
 
-  const color2 =
-    template.colors?.[1] || '#fbcfe8'
-
-  const gradient =
-    ctx.createLinearGradient(
-      0,
-      0,
-      width,
-      height
-    )
-
-  gradient.addColorStop(0, color1)
-  gradient.addColorStop(1, color2)
-
-  ctx.fillStyle = gradient
-
-  ctx.fillRect(
+  const gradient = ctx.createLinearGradient(
     0,
     0,
     width,
     height
   )
+
+  gradient.addColorStop(0, colors[0])
+  gradient.addColorStop(1, colors[1])
+
+  ctx.fillStyle = gradient
+  ctx.fillRect(0, 0, width, height)
 }
 
-/*
-|--------------------------------------------------------------------------
-| GENERATE RESULT
-|--------------------------------------------------------------------------
-*/
+/* =========================================================
+   SHADOW
+========================================================= */
+
+const shadowOn = (
+  ctx: CanvasRenderingContext2D
+) => {
+  ctx.shadowColor = 'rgba(0,0,0,0.15)'
+  ctx.shadowBlur = 30
+  ctx.shadowOffsetY = 12
+}
+
+const shadowOff = (
+  ctx: CanvasRenderingContext2D
+) => {
+  ctx.shadowColor = 'transparent'
+  ctx.shadowBlur = 0
+  ctx.shadowOffsetY = 0
+}
+
+/* =========================================================
+   FRAME
+========================================================= */
+
+const drawFrame = (
+  ctx: CanvasRenderingContext2D,
+  img: HTMLImageElement,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  radius = 20
+) => {
+  ctx.save()
+
+  shadowOn(ctx)
+
+  ctx.fillStyle = '#ffffff'
+
+  roundedRect(
+    ctx,
+    x - 12,
+    y - 12,
+    width + 24,
+    height + 24,
+    radius + 6
+  )
+
+  ctx.fill()
+
+  shadowOff(ctx)
+
+  drawCover(
+    ctx,
+    img,
+    x,
+    y,
+    width,
+    height,
+    radius
+  )
+
+  ctx.restore()
+}
+
+/* =========================================================
+   TEMPLATE 1
+   VERTICAL / KAWAII
+========================================================= */
+
+const layoutVertical = (
+  ctx: CanvasRenderingContext2D,
+  images: HTMLImageElement[],
+  W: number,
+  H: number
+) => {
+  drawText(
+    ctx,
+    template.title || 'Kawaii Pink',
+    W / 2,
+    100,
+    62,
+    '#831843',
+    '700',
+    'Georgia'
+  )
+
+  drawText(
+    ctx,
+    template.subtitle || 'Captured moments',
+    W / 2,
+    145,
+    25,
+    '#9d174d',
+    '400',
+    'Arial'
+  )
+
+  const x = 100
+  const width = 1000
+  const height = 330
+  let y = 210
+
+  images.forEach((img, index) => {
+    drawFrame(
+      ctx,
+      img,
+      x,
+      y,
+      width,
+      height,
+      22
+    )
+
+    drawText(
+      ctx,
+      String(index + 1).padStart(2, '0'),
+      W / 2,
+      y + height + 48,
+      22,
+      '#831843',
+      '700'
+    )
+
+    y += 390
+  })
+
+  drawText(
+    ctx,
+    '♡',
+    W / 2,
+    H - 55,
+    42,
+    '#be185d',
+    '400'
+  )
+}
+
+/* =========================================================
+   TEMPLATE 2
+   FILM STRIP
+========================================================= */
+
+const layoutFilm = (
+  ctx: CanvasRenderingContext2D,
+  images: HTMLImageElement[],
+  W: number,
+  H: number
+) => {
+  ctx.fillStyle = '#111111'
+  ctx.fillRect(70, 50, W - 140, H - 100)
+
+  drawText(
+    ctx,
+    template.title || 'Film Memories',
+    W / 2,
+    130,
+    55,
+    '#ffffff',
+    '700',
+    'Georgia'
+  )
+
+  const x = 170
+  const width = 860
+  const height = 300
+
+  let y = 200
+
+  images.forEach((img, index) => {
+    ctx.fillStyle = '#ffffff'
+    ctx.fillRect(
+      x - 18,
+      y - 18,
+      width + 36,
+      height + 36
+    )
+
+    drawCover(
+      ctx,
+      img,
+      x,
+      y,
+      width,
+      height,
+      0
+    )
+
+    drawText(
+      ctx,
+      `FRAME ${index + 1}`,
+      W / 2,
+      y + height + 45,
+      18,
+      '#111111',
+      '700'
+    )
+
+    y += 375
+  })
+
+  drawText(
+    ctx,
+    template.subtitle || 'Good memories',
+    W / 2,
+    H - 65,
+    22,
+    '#ffffff',
+    '400'
+  )
+}
+
+/* =========================================================
+   TEMPLATE 3
+   2x2 GRID
+========================================================= */
+
+const layoutGrid = (
+  ctx: CanvasRenderingContext2D,
+  images: HTMLImageElement[],
+  W: number,
+  H: number
+) => {
+  drawText(
+    ctx,
+    template.title || 'Moments',
+    W / 2,
+    105,
+    60,
+    '#292524',
+    '700',
+    'Georgia'
+  )
+
+  drawText(
+    ctx,
+    template.subtitle || 'Our memories',
+    W / 2,
+    150,
+    24,
+    '#57534e',
+    '400'
+  )
+
+  const positions = [
+    [90, 220],
+    [610, 220],
+    [90, 900],
+    [610, 900]
+  ]
+
+  images.forEach((img, index) => {
+    const [x, y] = positions[index]
+
+    drawFrame(
+      ctx,
+      img,
+      x,
+      y,
+      480,
+      580,
+      26
+    )
+
+    drawText(
+      ctx,
+      `0${index + 1}`,
+      x + 240,
+      y + 625,
+      18,
+      '#57534e',
+      '700'
+    )
+  })
+}
+
+/* =========================================================
+   TEMPLATE 4
+   POLAROID
+========================================================= */
+
+const layoutPolaroid = (
+  ctx: CanvasRenderingContext2D,
+  images: HTMLImageElement[],
+  W: number,
+  H: number
+) => {
+  drawText(
+    ctx,
+    template.title || 'Memories',
+    W / 2,
+    110,
+    58,
+    '#44403c',
+    '700',
+    'Georgia'
+  )
+
+  const positions = [
+    [100, 210, -3],
+    [620, 210, 3],
+    [100, 900, 2],
+    [620, 900, -2]
+  ]
+
+  images.forEach((img, index) => {
+    const [x, y, rotate] = positions[index]
+
+    ctx.save()
+
+    ctx.translate(
+      x + 220,
+      y + 270
+    )
+
+    ctx.rotate(
+      (rotate * Math.PI) / 180
+    )
+
+    shadowOn(ctx)
+
+    ctx.fillStyle = '#ffffff'
+
+    ctx.fillRect(
+      -220,
+      -270,
+      440,
+      540
+    )
+
+    shadowOff(ctx)
+
+    drawCover(
+      ctx,
+      img,
+      -195,
+      -240,
+      390,
+      390,
+      8
+    )
+
+    drawText(
+      ctx,
+      `memory ${index + 1}`,
+      0,
+      220,
+      19,
+      '#44403c',
+      '400',
+      'cursive'
+    )
+
+    ctx.restore()
+  })
+}
+
+/* =========================================================
+   TEMPLATE 5
+   EDITORIAL
+========================================================= */
+
+const layoutEditorial = (
+  ctx: CanvasRenderingContext2D,
+  images: HTMLImageElement[],
+  W: number,
+  H: number
+) => {
+  drawText(
+    ctx,
+    'THE',
+    W / 2,
+    90,
+    22,
+    '#57534e',
+    '700'
+  )
+
+  drawText(
+    ctx,
+    template.title || 'STORY',
+    W / 2,
+    165,
+    80,
+    '#1c1917',
+    '700',
+    'Georgia'
+  )
+
+  drawText(
+    ctx,
+    template.subtitle || 'A collection of moments',
+    W / 2,
+    205,
+    20,
+    '#78716c',
+    '400'
+  )
+
+  if (images[0]) {
+    drawCover(
+      ctx,
+      images[0],
+      80,
+      260,
+      1040,
+      560,
+      20
+    )
+  }
+
+  if (images[1]) {
+    drawCover(
+      ctx,
+      images[1],
+      80,
+      860,
+      500,
+      500,
+      20
+    )
+  }
+
+  if (images[2]) {
+    drawCover(
+      ctx,
+      images[2],
+      620,
+      860,
+      500,
+      500,
+      20
+    )
+  }
+
+  if (images[3]) {
+    drawCover(
+      ctx,
+      images[3],
+      80,
+      1400,
+      1040,
+      240,
+      20
+    )
+  }
+}
+
+/* =========================================================
+   TEMPLATE 6
+   SCRAPBOOK
+========================================================= */
+
+const layoutScrapbook = (
+  ctx: CanvasRenderingContext2D,
+  images: HTMLImageElement[],
+  W: number,
+  H: number
+) => {
+  drawText(
+    ctx,
+    template.title || 'Our Story',
+    W / 2,
+    110,
+    65,
+    '#be185d',
+    '700',
+    'cursive'
+  )
+
+  const positions = [
+    [100, 200, -4],
+    [620, 220, 4],
+    [100, 880, 3],
+    [620, 900, -3]
+  ]
+
+  images.forEach((img, index) => {
+    const [x, y, rotate] = positions[index]
+
+    ctx.save()
+
+    ctx.translate(
+      x + 220,
+      y + 260
+    )
+
+    ctx.rotate(
+      (rotate * Math.PI) / 180
+    )
+
+    shadowOn(ctx)
+
+    ctx.fillStyle = '#ffffff'
+
+    ctx.fillRect(
+      -220,
+      -260,
+      440,
+      520
+    )
+
+    shadowOff(ctx)
+
+    drawCover(
+      ctx,
+      img,
+      -195,
+      -235,
+      390,
+      390,
+      12
+    )
+
+    drawText(
+      ctx,
+      '♡',
+      0,
+      225,
+      32,
+      '#ec4899',
+      '400'
+    )
+
+    ctx.restore()
+  })
+
+  drawText(
+    ctx,
+    template.subtitle || 'made with love',
+    W / 2,
+    1680,
+    28,
+    '#be185d',
+    '700',
+    'cursive'
+  )
+}
+
+/* =========================================================
+   TEMPLATE 7
+   MAGAZINE
+========================================================= */
+
+const layoutMagazine = (
+  ctx: CanvasRenderingContext2D,
+  images: HTMLImageElement[],
+  W: number,
+  H: number
+) => {
+  ctx.fillStyle = '#18181b'
+  ctx.fillRect(
+    60,
+    60,
+    W - 120,
+    H - 120
+  )
+
+  drawText(
+    ctx,
+    'SPECIAL EDITION',
+    W / 2,
+    140,
+    24,
+    '#ffffff',
+    '700'
+  )
+
+  drawText(
+    ctx,
+    template.title || 'MOMENTS',
+    W / 2,
+    220,
+    78,
+    '#ffffff',
+    '700',
+    'Georgia'
+  )
+
+  if (images[0]) {
+    drawCover(
+      ctx,
+      images[0],
+      100,
+      300,
+      1000,
+      620,
+      0
+    )
+  }
+
+  if (images[1]) {
+    drawCover(
+      ctx,
+      images[1],
+      100,
+      970,
+      480,
+      500,
+      0
+    )
+  }
+
+  if (images[2]) {
+    drawCover(
+      ctx,
+      images[2],
+      620,
+      970,
+      480,
+      500,
+      0
+    )
+  }
+
+  drawText(
+    ctx,
+    template.subtitle || 'THE PHOTO ISSUE',
+    W / 2,
+    1610,
+    22,
+    '#ffffff',
+    '400'
+  )
+}
+
+/* =========================================================
+   TEMPLATE 8
+   RETRO
+========================================================= */
+
+const layoutRetro = (
+  ctx: CanvasRenderingContext2D,
+  images: HTMLImageElement[],
+  W: number,
+  H: number
+) => {
+  drawText(
+    ctx,
+    template.title || 'GOOD TIMES',
+    W / 2,
+    120,
+    70,
+    '#7f1d1d',
+    '700',
+    'Georgia'
+  )
+
+  drawText(
+    ctx,
+    template.subtitle || 'Since forever',
+    W / 2,
+    165,
+    22,
+    '#7f1d1d',
+    '400'
+  )
+
+  const positions = [
+    [100, 240],
+    [630, 240],
+    [100, 890],
+    [630, 890]
+  ]
+
+  images.forEach((img, index) => {
+    const [x, y] = positions[index]
+
+    ctx.fillStyle = '#fef3c7'
+
+    ctx.fillRect(
+      x,
+      y,
+      470,
+      520
+    )
+
+    drawCover(
+      ctx,
+      img,
+      x + 20,
+      y + 20,
+      430,
+      430,
+      0
+    )
+
+    drawText(
+      ctx,
+      'GOOD TIMES',
+      x + 235,
+      y + 490,
+      18,
+      '#7f1d1d',
+      '700',
+      'Georgia'
+    )
+  })
+}
+
+/* =========================================================
+   TEMPLATE 9
+   MINIMAL
+========================================================= */
+
+const layoutMinimal = (
+  ctx: CanvasRenderingContext2D,
+  images: HTMLImageElement[],
+  W: number,
+  H: number
+) => {
+  drawText(
+    ctx,
+    template.title || 'moments',
+    W / 2,
+    100,
+    52,
+    '#18181b',
+    '400',
+    'Arial'
+  )
+
+  const x = 100
+  const width = 1000
+  const height = 330
+
+  images.forEach((img, index) => {
+    drawCover(
+      ctx,
+      img,
+      x,
+      170 + index * 385,
+      width,
+      height,
+      0
+    )
+  })
+
+  drawText(
+    ctx,
+    template.subtitle || 'simple memories',
+    W / 2,
+    1720,
+    20,
+    '#71717a',
+    '400'
+  )
+}
+
+/* =========================================================
+   TEMPLATE 10
+   CUTE
+========================================================= */
+
+const layoutCute = (
+  ctx: CanvasRenderingContext2D,
+  images: HTMLImageElement[],
+  W: number,
+  H: number
+) => {
+  drawText(
+    ctx,
+    '♡',
+    W / 2,
+    100,
+    65,
+    '#db2777'
+  )
+
+  drawText(
+    ctx,
+    template.title || 'Cute Memories',
+    W / 2,
+    170,
+    60,
+    '#db2777',
+    '700',
+    'cursive'
+  )
+
+  const positions = [
+    [100, 250],
+    [620, 250],
+    [100, 900],
+    [620, 900]
+  ]
+
+  images.forEach((img, index) => {
+    const [x, y] = positions[index]
+
+    drawFrame(
+      ctx,
+      img,
+      x,
+      y,
+      480,
+      520,
+      35
+    )
+  })
+
+  drawText(
+    ctx,
+    template.subtitle || 'sweet memories',
+    W / 2,
+    1600,
+    30,
+    '#be185d',
+    '700',
+    'cursive'
+  )
+}
+
+/* =========================================================
+   TEMPLATE 11
+   DARK LUXURY
+========================================================= */
+
+const layoutDark = (
+  ctx: CanvasRenderingContext2D,
+  images: HTMLImageElement[],
+  W: number,
+  H: number
+) => {
+  ctx.fillStyle = '#101014'
+  ctx.fillRect(0, 0, W, H)
+
+  drawText(
+    ctx,
+    template.title || 'NIGHT',
+    W / 2,
+    125,
+    70,
+    '#ffffff',
+    '700',
+    'Georgia'
+  )
+
+  drawText(
+    ctx,
+    template.subtitle || 'moments',
+    W / 2,
+    170,
+    20,
+    '#a1a1aa',
+    '400'
+  )
+
+  images.forEach((img, index) => {
+    drawCover(
+      ctx,
+      img,
+      100,
+      230 + index * 360,
+      1000,
+      310,
+      12
+    )
+  })
+
+  drawText(
+    ctx,
+    '✦',
+    W / 2,
+    1730,
+    35,
+    '#ffffff',
+    '400'
+  )
+}
+
+/* =========================================================
+   TEMPLATE 12
+   CLASSIC VERTICAL
+========================================================= */
+
+const layoutClassic = (
+  ctx: CanvasRenderingContext2D,
+  images: HTMLImageElement[],
+  W: number,
+  H: number
+) => {
+  drawText(
+    ctx,
+    template.title || 'Classic',
+    W / 2,
+    105,
+    62,
+    '#18181b',
+    '700',
+    'Georgia'
+  )
+
+  drawText(
+    ctx,
+    template.subtitle || 'Beautiful moments',
+    W / 2,
+    150,
+    20,
+    '#71717a',
+    '400'
+  )
+
+  let y = 220
+
+  images.forEach((img) => {
+    drawFrame(
+      ctx,
+      img,
+      100,
+      y,
+      1000,
+      300,
+      18
+    )
+
+    y += 370
+  })
+
+  drawText(
+    ctx,
+    'THE END',
+    W / 2,
+    1730,
+    18,
+    '#71717a',
+    '700'
+  )
+}
+
+/* =========================================================
+   GENERATE RESULT
+========================================================= */
+
 const generate = async () => {
   if (!canvas.value) return
 
   loading.value = true
+  errorMessage.value = ''
 
-  const images: HTMLImageElement[] = []
+  try {
+    const loadedImages: HTMLImageElement[] = []
 
-  for (
-    const photo of photos.value.slice(0, 4)
-  ) {
-    try {
-      const img = await loadImage(photo)
-      images.push(img)
-    } catch (error) {
-      console.error(
-        'Foto gagal dimuat:',
-        error
-      )
-    }
-  }
+    const selectedPhotos = photos.value.slice(0, 4)
 
-  if (!images.length) {
-    loading.value = false
-    return
-  }
-
-  const ctx =
-    canvas.value.getContext('2d')
-
-  if (!ctx) {
-    loading.value = false
-    return
-  }
-
-  /*
-  |--------------------------------------------------------------------------
-  | UKURAN HASIL FINAL
-  |--------------------------------------------------------------------------
-  */
-  const W = 1200
-  const H = 1800
-
-  canvas.value.width = W
-  canvas.value.height = H
-
-  ctx.clearRect(
-    0,
-    0,
-    W,
-    H
-  )
-
-  /*
-  |--------------------------------------------------------------------------
-  | BACKGROUND
-  |--------------------------------------------------------------------------
-  */
-  drawBackground(
-    ctx,
-    W,
-    H
-  )
-
-  /*
-  |--------------------------------------------------------------------------
-  | 1. VERTICAL
-  |--------------------------------------------------------------------------
-  */
-  if (
-    template.layout === 'vertical'
-  ) {
-    drawText(
-      ctx,
-      template.title,
-      600,
-      80,
-      62,
-      '#831843',
-      'bold',
-      'Georgia'
-    )
-
-    drawText(
-      ctx,
-      template.subtitle,
-      600,
-      140,
-      25,
-      '#9d174d',
-      'normal'
-    )
-
-    const photoW = 1030
-    const photoH = 330
-    const x = 85
-    const startY = 205
-    const gap = 50
-
-    images.forEach(
-      (img, i) => {
-        const y =
-          startY +
-          i * (photoH + gap)
-
-        photoFrame(
-          ctx,
-          img,
-          x,
-          y,
-          photoW,
-          photoH,
-          18
-        )
-
-        drawText(
-          ctx,
-          `0${i + 1}`,
-          600,
-          y + photoH + 22,
-          18,
-          '#9d174d',
-          'bold'
-        )
+    for (const photo of selectedPhotos) {
+      try {
+        const image = await loadImage(photo)
+        loadedImages.push(image)
+      } catch (error) {
+        console.error('Gagal load foto:', error)
       }
-    )
-
-    drawText(
-      ctx,
-      '♡',
-      600,
-      1725,
-      42,
-      '#be185d'
-    )
-  }
-
-  /*
-  |--------------------------------------------------------------------------
-  | 2. FILM
-  |--------------------------------------------------------------------------
-  */
-  else if (
-    template.layout === 'film'
-  ) {
-    ctx.fillStyle = '#111111'
-
-    ctx.fillRect(
-      60,
-      50,
-      1080,
-      1700
-    )
-
-    drawText(
-      ctx,
-      template.title,
-      600,
-      115,
-      58,
-      '#ffffff',
-      'bold',
-      'Georgia'
-    )
-
-    const photoW = 820
-    const photoH = 270
-    const x = 190
-    const startY = 200
-    const gap = 55
-
-    images.forEach(
-      (img, i) => {
-        const y =
-          startY +
-          i * (photoH + gap)
-
-        photoFrame(
-          ctx,
-          img,
-          x,
-          y,
-          photoW,
-          photoH,
-          4
-        )
-
-        drawText(
-          ctx,
-          `FRAME ${i + 1}`,
-          600,
-          y + photoH + 25,
-          17,
-          '#ffffff',
-          'bold'
-        )
-      }
-    )
-
-    drawText(
-      ctx,
-      template.subtitle,
-      600,
-      1715,
-      20,
-      '#ffffff',
-      'normal'
-    )
-  }
-
-  /*
-  |--------------------------------------------------------------------------
-  | 3. GRID
-  |--------------------------------------------------------------------------
-  */
-  else if (
-    template.layout === 'grid'
-  ) {
-    drawText(
-      ctx,
-      template.title,
-      600,
-      95,
-      58,
-      '#292524',
-      'bold',
-      'Georgia'
-    )
-
-    drawText(
-      ctx,
-      template.subtitle,
-      600,
-      145,
-      22,
-      '#57534e',
-      'normal'
-    )
-
-    const positions = [
-      [80, 220],
-      [620, 220],
-      [80, 930],
-      [620, 930]
-    ]
-
-    images.forEach(
-      (img, i) => {
-        const [x, y] =
-          positions[i]
-
-        photoFrame(
-          ctx,
-          img,
-          x,
-          y,
-          500,
-          600,
-          20
-        )
-      }
-    )
-  }
-
-  /*
-  |--------------------------------------------------------------------------
-  | 4. POLAROID
-  |--------------------------------------------------------------------------
-  */
-  else if (
-    template.layout === 'polaroid'
-  ) {
-    drawText(
-      ctx,
-      template.title,
-      600,
-      100,
-      58,
-      '#57534e',
-      'bold',
-      'Georgia'
-    )
-
-    const positions = [
-      [100, 220],
-      [610, 220],
-      [100, 930],
-      [610, 930]
-    ]
-
-    images.forEach(
-      (img, i) => {
-        const [x, y] =
-          positions[i]
-
-        ctx.save()
-
-        ctx.translate(
-          x + 220,
-          y + 260
-        )
-
-        ctx.rotate(
-          (i % 2 === 0 ? -2 : 2) *
-            Math.PI /
-            180
-        )
-
-        ctx.fillStyle =
-          '#ffffff'
-
-        ctx.fillRect(
-          -220,
-          -260,
-          440,
-          560
-        )
-
-        fitImage(
-          ctx,
-          img,
-          -195,
-          -235,
-          390,
-          390,
-          '#f4f4f5'
-        )
-
-        drawText(
-          ctx,
-          `memory ${i + 1}`,
-          0,
-          250,
-          19,
-          '#44403c',
-          'normal',
-          'cursive'
-        )
-
-        ctx.restore()
-      }
-    )
-  }
-
-  /*
-  |--------------------------------------------------------------------------
-  | 5. EDITORIAL
-  |--------------------------------------------------------------------------
-  */
-  else if (
-    template.layout === 'editorial'
-  ) {
-    drawText(
-      ctx,
-      'THE',
-      600,
-      75,
-      24,
-      '#44403c'
-    )
-
-    drawText(
-      ctx,
-      template.title,
-      600,
-      145,
-      78,
-      '#1c1917',
-      'bold',
-      'Georgia'
-    )
-
-    drawText(
-      ctx,
-      template.subtitle,
-      600,
-      200,
-      18,
-      '#78716c',
-      'normal'
-    )
-
-    if (images[0]) {
-      photoFrame(
-        ctx,
-        images[0],
-        80,
-        260,
-        1040,
-        500,
-        8
-      )
     }
 
-    if (images[1]) {
-      photoFrame(
-        ctx,
-        images[1],
-        80,
-        810,
-        500,
-        500,
-        8
-      )
+    if (!loadedImages.length) {
+      loading.value = false
+      return
     }
 
-    if (images[2]) {
-      photoFrame(
-        ctx,
-        images[2],
-        620,
-        810,
-        500,
-        500,
-        8
-      )
+    await nextTick()
+
+    const ctx = canvas.value.getContext('2d')
+
+    if (!ctx) {
+      throw new Error('Canvas tidak tersedia')
     }
 
-    if (images[3]) {
-      photoFrame(
-        ctx,
-        images[3],
-        80,
-        1360,
-        1040,
-        260,
-        8
-      )
-    }
-  }
+    /*
+      Ukuran hasil final.
+      1200 x 1800 = portrait 2:3
+    */
 
-  /*
-  |--------------------------------------------------------------------------
-  | 6. SCRAPBOOK
-  |--------------------------------------------------------------------------
-  */
-  else if (
-    template.layout === 'scrapbook'
-  ) {
-    drawText(
-      ctx,
-      template.title,
-      600,
-      95,
-      65,
-      '#be185d',
-      'bold',
-      'cursive'
-    )
+    const W = 1200
+    const H = 1800
 
-    const positions = [
-      [100, 210, -3],
-      [620, 210, 4],
-      [100, 900, 3],
-      [620, 900, -4]
-    ]
+    canvas.value.width = W
+    canvas.value.height = H
 
-    images.forEach(
-      (img, i) => {
-        const [x, y, rotation] =
-          positions[i]
-
-        ctx.save()
-
-        ctx.translate(
-          x + 220,
-          y + 260
-        )
-
-        ctx.rotate(
-          rotation *
-            Math.PI /
-            180
-        )
-
-        ctx.fillStyle =
-          '#ffffff'
-
-        ctx.fillRect(
-          -220,
-          -260,
-          440,
-          550
-        )
-
-        fitImage(
-          ctx,
-          img,
-          -195,
-          -235,
-          390,
-          390,
-          '#f4f4f5'
-        )
-
-        drawText(
-          ctx,
-          '♡',
-          0,
-          250,
-          32,
-          '#ec4899'
-        )
-
-        ctx.restore()
-      }
-    )
-
-    drawText(
-      ctx,
-      template.subtitle,
-      600,
-      1650,
-      30,
-      '#be185d',
-      'bold',
-      'cursive'
-    )
-  }
-
-  /*
-  |--------------------------------------------------------------------------
-  | 7. MAGAZINE
-  |--------------------------------------------------------------------------
-  */
-  else if (
-    template.layout === 'magazine'
-  ) {
-    ctx.fillStyle =
-      '#18181b'
-
-    ctx.fillRect(
-      50,
-      50,
-      1100,
-      1700
-    )
-
-    drawText(
-      ctx,
-      'SPECIAL',
-      600,
-      105,
-      28,
-      '#ffffff'
-    )
-
-    drawText(
-      ctx,
-      template.title,
-      600,
-      185,
-      80,
-      '#ffffff',
-      'bold',
-      'Georgia'
-    )
-
-    if (images[0]) {
-      photoFrame(
-        ctx,
-        images[0],
-        100,
-        290,
-        1000,
-        600,
-        4
-      )
-    }
-
-    if (images[1]) {
-      photoFrame(
-        ctx,
-        images[1],
-        100,
-        960,
-        480,
-        500,
-        4
-      )
-    }
-
-    if (images[2]) {
-      photoFrame(
-        ctx,
-        images[2],
-        620,
-        960,
-        480,
-        500,
-        4
-      )
-    }
-
-    drawText(
-      ctx,
-      template.subtitle,
-      600,
-      1600,
-      22,
-      '#ffffff'
-    )
-  }
-
-  /*
-  |--------------------------------------------------------------------------
-  | 8. RETRO
-  |--------------------------------------------------------------------------
-  */
-  else if (
-    template.layout === 'retro'
-  ) {
-    drawText(
-      ctx,
-      template.title,
-      600,
-      100,
-      70,
-      '#7f1d1d',
-      'bold',
-      'Georgia'
-    )
-
-    drawText(
-      ctx,
-      template.subtitle,
-      600,
-      155,
-      20,
-      '#7f1d1d'
-    )
-
-    const positions = [
-      [90, 220],
-      [620, 220],
-      [90, 930],
-      [620, 930]
-    ]
-
-    images.forEach(
-      (img, i) => {
-        const [x, y] =
-          positions[i]
-
-        ctx.fillStyle =
-          '#fef3c7'
-
-        ctx.fillRect(
-          x,
-          y,
-          490,
-          590
-        )
-
-        fitImage(
-          ctx,
-          img,
-          x + 25,
-          y + 25,
-          440,
-          480,
-          '#ffffff'
-        )
-
-        drawText(
-          ctx,
-          'GOOD TIMES',
-          x + 245,
-          y + 550,
-          18,
-          '#7f1d1d',
-          'bold',
-          'Georgia'
-        )
-      }
-    )
-  }
-
-  /*
-  |--------------------------------------------------------------------------
-  | 9. MINIMAL
-  |--------------------------------------------------------------------------
-  */
-  else if (
-    template.layout === 'minimal'
-  ) {
-    drawText(
-      ctx,
-      template.title,
-      600,
-      75,
-      48,
-      '#18181b',
-      'normal'
-    )
-
-    const photoW = 900
-    const photoH = 330
-    const x = 150
-
-    images.forEach(
-      (img, i) => {
-        const y =
-          160 +
-          i * 390
-
-        fitImage(
-          ctx,
-          img,
-          x,
-          y,
-          photoW,
-          photoH,
-          '#ffffff'
-        )
-      }
-    )
-
-    drawText(
-      ctx,
-      template.subtitle,
-      600,
-      1730,
-      20,
-      '#71717a',
-      'normal'
-    )
-  }
-
-  /*
-  |--------------------------------------------------------------------------
-  | 10. CUTE
-  |--------------------------------------------------------------------------
-  */
-  else if (
-    template.layout === 'cute'
-  ) {
-    drawText(
-      ctx,
-      '♡',
-      600,
-      75,
-      70,
-      '#db2777'
-    )
-
-    drawText(
-      ctx,
-      template.title,
-      600,
-      150,
-      62,
-      '#db2777',
-      'bold',
-      'cursive'
-    )
-
-    const positions = [
-      [90, 250],
-      [630, 250],
-      [90, 900],
-      [630, 900]
-    ]
-
-    images.forEach(
-      (img, i) => {
-        const [x, y] =
-          positions[i]
-
-        ctx.save()
-
-        ctx.beginPath()
-
-        ctx.roundRect(
-          x,
-          y,
-          480,
-          520,
-          30
-        )
-
-        ctx.clip()
-
-        fitImage(
-          ctx,
-          img,
-          x,
-          y,
-          480,
-          520,
-          '#fdf2f8'
-        )
-
-        ctx.restore()
-      }
-    )
-
-    drawText(
-      ctx,
-      template.subtitle,
-      600,
-      1600,
-      30,
-      '#be185d',
-      'bold',
-      'cursive'
-    )
-  }
-
-  /*
-  |--------------------------------------------------------------------------
-  | 11. DARK
-  |--------------------------------------------------------------------------
-  */
-  else if (
-    template.layout === 'dark'
-  ) {
-    ctx.fillStyle =
-      '#101014'
-
-    ctx.fillRect(
+    ctx.clearRect(
       0,
       0,
       W,
       H
     )
 
-    drawText(
+    /*
+      Background default.
+    */
+
+    drawBackground(
       ctx,
-      template.title,
-      600,
-      90,
-      70,
-      '#ffffff',
-      'bold',
-      'Georgia'
+      W,
+      H
     )
 
-    drawText(
-      ctx,
-      template.subtitle,
-      600,
-      145,
-      18,
-      '#a1a1aa'
-    )
+    /*
+      Tentukan layout.
+    */
 
-    const photoW = 1000
-    const photoH = 310
-    const x = 100
+    const layout =
+      String(template?.layout || 'vertical')
+        .toLowerCase()
 
-    images.forEach(
-      (img, i) => {
-        fitImage(
+    switch (layout) {
+      case 'vertical':
+        layoutVertical(
           ctx,
-          img,
-          x,
-          230 + i * 360,
-          photoW,
-          photoH,
-          '#18181b'
+          loadedImages,
+          W,
+          H
         )
-      }
-    )
+        break
 
-    drawText(
-      ctx,
-      '✦',
-      600,
-      1730,
-      35,
-      '#ffffff'
-    )
+      case 'film':
+        layoutFilm(
+          ctx,
+          loadedImages,
+          W,
+          H
+        )
+        break
+
+      case 'grid':
+        layoutGrid(
+          ctx,
+          loadedImages,
+          W,
+          H
+        )
+        break
+
+      case 'polaroid':
+        layoutPolaroid(
+          ctx,
+          loadedImages,
+          W,
+          H
+        )
+        break
+
+      case 'editorial':
+        layoutEditorial(
+          ctx,
+          loadedImages,
+          W,
+          H
+        )
+        break
+
+      case 'scrapbook':
+        layoutScrapbook(
+          ctx,
+          loadedImages,
+          W,
+          H
+        )
+        break
+
+      case 'magazine':
+        layoutMagazine(
+          ctx,
+          loadedImages,
+          W,
+          H
+        )
+        break
+
+      case 'retro':
+        layoutRetro(
+          ctx,
+          loadedImages,
+          W,
+          H
+        )
+        break
+
+      case 'minimal':
+        layoutMinimal(
+          ctx,
+          loadedImages,
+          W,
+          H
+        )
+        break
+
+      case 'cute':
+        layoutCute(
+          ctx,
+          loadedImages,
+          W,
+          H
+        )
+        break
+
+      case 'dark':
+        layoutDark(
+          ctx,
+          loadedImages,
+          W,
+          H
+        )
+        break
+
+      case 'classic':
+      default:
+        layoutClassic(
+          ctx,
+          loadedImages,
+          W,
+          H
+        )
+        break
+    }
+
+    /*
+      Export JPG.
+      JPEG quality 0.95
+    */
+
+    resultUrl.value =
+      canvas.value.toDataURL(
+        'image/jpeg',
+        0.95
+      )
+
+  } catch (error) {
+    console.error(error)
+
+    errorMessage.value =
+      'Gagal membuat hasil foto.'
   }
-
-  /*
-  |--------------------------------------------------------------------------
-  | 12. CLASSIC
-  |--------------------------------------------------------------------------
-  */
-  else {
-    drawText(
-      ctx,
-      template.title,
-      600,
-      80,
-      65,
-      '#18181b',
-      'bold',
-      'Georgia'
-    )
-
-    drawText(
-      ctx,
-      template.subtitle,
-      600,
-      135,
-      20,
-      '#71717a'
-    )
-
-    const photoW = 970
-    const photoH = 300
-    const x = 115
-
-    images.forEach(
-      (img, i) => {
-        const y =
-          200 +
-          i * 370
-
-        photoFrame(
-          ctx,
-          img,
-          x - 15,
-          y - 15,
-          1000,
-          330,
-          4
-        )
-
-        fitImage(
-          ctx,
-          img,
-          x,
-          y,
-          photoW,
-          photoH,
-          '#f4f4f5'
-        )
-      }
-    )
-  }
-
-  /*
-  |--------------------------------------------------------------------------
-  | HASIL JPG
-  |--------------------------------------------------------------------------
-  */
-  resultUrl.value =
-    canvas.value.toDataURL(
-      'image/jpeg',
-      0.95
-    )
 
   loading.value = false
 }
 
-/*
-|--------------------------------------------------------------------------
-| DOWNLOAD JPG
-|--------------------------------------------------------------------------
-*/
+/* =========================================================
+   DOWNLOAD
+========================================================= */
+
 const download = async () => {
-  if (!canvas.value) return
+  if (!resultUrl.value) return
 
   try {
-    canvas.value.toBlob(
-      async (blob) => {
-        if (!blob) return
+    /*
+      Convert dataURL ke Blob
+    */
 
-        const filename =
-          `photobooth-${String(
-            template.name
-          )
-            .toLowerCase()
-            .replace(/\s+/g, '-')}.jpg`
+    const response =
+      await fetch(resultUrl.value)
 
-        const url =
-          URL.createObjectURL(blob)
+    const blob =
+      await response.blob()
 
-        const a =
-          document.createElement('a')
+    const blobUrl =
+      URL.createObjectURL(blob)
 
-        a.href = url
-        a.download = filename
-        a.style.display = 'none'
+    const filename =
+      `photobooth-${String(
+        template?.name || 'result'
+      )
+        .toLowerCase()
+        .replace(/\s+/g, '-')}.jpg`
 
-        document.body.appendChild(a)
-        a.click()
-        document.body.removeChild(a)
+    const a =
+      document.createElement('a')
 
-        setTimeout(() => {
-          URL.revokeObjectURL(url)
-        }, 1000)
-      },
-      'image/jpeg',
-      0.95
-    )
+    a.href = blobUrl
+    a.download = filename
+
+    document.body.appendChild(a)
+
+    a.click()
+
+    document.body.removeChild(a)
+
+    setTimeout(() => {
+      URL.revokeObjectURL(blobUrl)
+    }, 1000)
+
   } catch (error) {
     console.error(
       'Download gagal:',
@@ -1258,141 +1376,244 @@ const download = async () => {
     )
 
     /*
-    |--------------------------------------------------------------------------
-    | FALLBACK HP
-    |--------------------------------------------------------------------------
+      Fallback untuk browser HP
     */
-    if (resultUrl.value) {
-      window.open(
-        resultUrl.value,
-        '_blank'
-      )
-    }
+
+    window.open(
+      resultUrl.value,
+      '_blank'
+    )
   }
 }
 
-/*
-|--------------------------------------------------------------------------
-| FOTO LAGI
-|--------------------------------------------------------------------------
-*/
+/* =========================================================
+   RETAKE
+========================================================= */
+
 const retake = () => {
   navigateTo(
     `/camera?template=${template.id}`
   )
 }
 
-/*
-|--------------------------------------------------------------------------
-| HOME
-|--------------------------------------------------------------------------
-*/
+/* =========================================================
+   HOME
+========================================================= */
+
 const home = () => {
   navigateTo('/')
 }
+
+/* =========================================================
+   LOAD
+========================================================= */
+
+onMounted(async () => {
+  const saved =
+    localStorage.getItem(
+      'photobooth_photos'
+    )
+
+  if (saved) {
+    try {
+      const parsed =
+        JSON.parse(saved)
+
+      if (Array.isArray(parsed)) {
+        photos.value = parsed
+      }
+    } catch (error) {
+      console.error(
+        'LocalStorage error:',
+        error
+      )
+
+      photos.value = []
+    }
+  }
+
+  if (photos.value.length) {
+    await generate()
+  } else {
+    loading.value = false
+  }
+})
 </script>
 
 <template>
   <div class="page">
 
     <!-- HEADER -->
+
     <header class="header">
 
       <button
-        class="home-button"
+        class="home-btn"
         @click="home"
       >
-        ← Home
+        ←
+        <span>Home</span>
       </button>
 
-      <strong class="logo">
-        📸 Photobooth
-      </strong>
+      <div class="brand">
+        <span class="brand-camera">
+          📸
+        </span>
 
-      <span class="template-name">
-        {{ template.name }}
-      </span>
+        <span>
+          Photobooth
+        </span>
+      </div>
+
+      <div class="template-badge">
+        {{ template?.name || 'Template' }}
+      </div>
 
     </header>
 
-    <!-- CONTENT -->
+
+    <!-- MAIN -->
+
     <main class="main">
+
+      <!-- HEADING -->
 
       <section class="heading">
 
-        <small>
-          YOUR RESULT
-        </small>
+        <div class="eyebrow">
+          YOUR MEMORIES
+        </div>
 
         <h1>
-          {{ template.title }}
+          {{ template?.title || 'Your Result' }}
         </h1>
 
         <p>
-          {{ template.subtitle }}
+          {{ template?.subtitle || 'Beautiful moments captured together.' }}
         </p>
 
       </section>
 
+
       <!-- LOADING -->
+
       <div
         v-if="loading"
-        class="loading"
+        class="state-card"
       >
-        <div class="spinner"></div>
+
+        <div class="loader"></div>
+
+        <h2>
+          Membuat hasil foto...
+        </h2>
 
         <p>
-          Membuat hasil foto...
+          Tunggu sebentar ya.
         </p>
+
       </div>
 
-      <!-- RESULT -->
-      <section
-        v-else-if="resultUrl"
-        class="result"
+
+      <!-- ERROR -->
+
+      <div
+        v-else-if="errorMessage"
+        class="state-card error"
       >
 
-        <div class="image-box">
+        <div class="state-icon">
+          ⚠️
+        </div>
+
+        <h2>
+          Terjadi kesalahan
+        </h2>
+
+        <p>
+          {{ errorMessage }}
+        </p>
+
+        <button
+          class="primary-btn"
+          @click="generate"
+        >
+          Coba Lagi
+        </button>
+
+      </div>
+
+
+      <!-- RESULT -->
+
+      <section
+        v-else-if="resultUrl"
+        class="result-section"
+      >
+
+        <div class="result-card">
 
           <img
             :src="resultUrl"
             alt="Hasil Photobooth"
-          >
+            class="result-image"
+          />
 
         </div>
 
-        <div class="buttons">
+
+        <!-- ACTIONS -->
+
+        <div class="actions">
 
           <button
-            class="download"
+            class="download-btn"
             @click="download"
           >
-            ⬇ Download JPG
+            <span>↓</span>
+            Download JPG
           </button>
 
           <button
-            class="retake"
+            class="retake-btn"
             @click="retake"
           >
-            📸 Foto Lagi
+            📸
+            Foto Lagi
           </button>
 
         </div>
 
-        <p class="info">
-          Hasil sudah digabung menjadi
-          <b>1 gambar JPG</b>
-        </p>
+
+        <div class="result-info">
+
+          <div class="check">
+            ✓
+          </div>
+
+          <div>
+            <strong>
+              Foto berhasil dibuat
+            </strong>
+
+            <span>
+              Hasil sudah digabung menjadi 1 gambar JPG
+            </span>
+          </div>
+
+        </div>
 
       </section>
 
+
       <!-- EMPTY -->
+
       <section
         v-else
-        class="empty"
+        class="state-card"
       >
 
-        <div class="empty-icon">
+        <div class="state-icon">
           📷
         </div>
 
@@ -1405,7 +1626,7 @@ const home = () => {
         </p>
 
         <button
-          class="download"
+          class="primary-btn"
           @click="retake"
         >
           Ambil Foto
@@ -1415,14 +1636,17 @@ const home = () => {
 
     </main>
 
-    <!-- CANVAS -->
+
+    <!-- HIDDEN CANVAS -->
+
     <canvas
       ref="canvas"
-      class="canvas"
+      class="hidden-canvas"
     />
 
   </div>
 </template>
+
 
 <style scoped>
 * {
@@ -1431,27 +1655,51 @@ const home = () => {
 
 .page {
   min-height: 100vh;
-  background: #fafafa;
+  background:
+    radial-gradient(
+      circle at top left,
+      #fdf2f8,
+      transparent 35%
+    ),
+    radial-gradient(
+      circle at bottom right,
+      #f3e8ff,
+      transparent 35%
+    ),
+    #fafafa;
+
   color: #18181b;
+
   font-family:
     Inter,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
     Arial,
     sans-serif;
 }
 
+
+/* =========================================================
+   HEADER
+========================================================= */
+
 .header {
-  height: 70px;
+  height: 76px;
+
   display: flex;
   align-items: center;
   justify-content: space-between;
 
-  padding:
-    0 5%;
+  padding: 0 5%;
 
-  background: white;
+  background:
+    rgba(255,255,255,.92);
+
+  backdrop-filter: blur(18px);
 
   border-bottom:
-    1px solid #e4e4e7;
+    1px solid rgba(0,0,0,.06);
 
   position: sticky;
   top: 0;
@@ -1459,9 +1707,13 @@ const home = () => {
   z-index: 20;
 }
 
-.home-button {
+.home-btn {
   border: none;
-  background: transparent;
+  background: none;
+
+  display: flex;
+  align-items: center;
+  gap: 8px;
 
   font-size: 15px;
   font-weight: 700;
@@ -1471,129 +1723,182 @@ const home = () => {
   cursor: pointer;
 }
 
-.logo {
+.home-btn:hover {
   color: #7c3aed;
-  font-size: 19px;
 }
 
-.template-name {
-  color: #71717a;
-  font-size: 13px;
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+
+  font-size: 20px;
+  font-weight: 900;
+
+  background:
+    linear-gradient(
+      135deg,
+      #7c3aed,
+      #db2777
+    );
+
+  background-clip: text;
+  -webkit-background-clip: text;
+
+  color: transparent;
 }
 
-/* MAIN */
+.brand-camera {
+  color: initial;
+}
+
+.template-badge {
+  padding: 8px 14px;
+
+  border-radius: 999px;
+
+  background: #f5f3ff;
+
+  color: #7c3aed;
+
+  font-size: 12px;
+  font-weight: 800;
+}
+
+
+/* =========================================================
+   MAIN
+========================================================= */
 
 .main {
   width: 92%;
-  max-width: 850px;
+  max-width: 820px;
 
-  margin:
-    0 auto;
+  margin: auto;
 
   padding:
-    45px 0 80px;
+    55px 0
+    100px;
 }
 
-/* HEADING */
+
+/* =========================================================
+   HEADING
+========================================================= */
 
 .heading {
   text-align: center;
 
-  margin-bottom:
-    30px;
+  margin-bottom: 35px;
 }
 
-.heading small {
+.eyebrow {
   color: #7c3aed;
 
   font-size: 11px;
 
   font-weight: 900;
 
-  letter-spacing: 3px;
+  letter-spacing: 4px;
+
+  margin-bottom: 10px;
 }
 
 .heading h1 {
-  margin:
-    8px 0;
+  margin: 0;
 
-  font-size: 40px;
+  font-family:
+    Georgia,
+    serif;
 
-  line-height: 1.1;
+  font-size: clamp(
+    32px,
+    6vw,
+    52px
+  );
+
+  line-height: 1.05;
+
+  color: #18181b;
 }
 
 .heading p {
-  margin: 0;
+  margin:
+    14px auto
+    0;
+
+  max-width: 550px;
 
   color: #71717a;
 
   font-size: 15px;
+
+  line-height: 1.6;
 }
 
-/* RESULT */
 
-.result {
+/* =========================================================
+   RESULT
+========================================================= */
+
+.result-section {
   width: 100%;
 }
 
-/*
-|--------------------------------------------------------------------------
-| IMAGE PREVIEW
-|--------------------------------------------------------------------------
-*/
+.result-card {
+  width: min(
+    100%,
+    620px
+  );
 
-.image-box {
-  width: 100%;
-  max-width: 600px;
+  margin: auto;
 
-  margin:
-    0 auto;
+  padding: 14px;
 
-  padding: 12px;
+  background: white;
 
-  background:
-    white;
-
-  border-radius:
-    22px;
+  border-radius: 28px;
 
   box-shadow:
-    0 20px 60px
-    rgba(0, 0, 0, 0.14);
+    0 30px 80px
+    rgba(0,0,0,.15);
+
+  border:
+    1px solid rgba(0,0,0,.05);
 }
 
-.image-box img {
+.result-image {
   width: 100%;
-
-  height: auto;
 
   display: block;
 
-  border-radius:
-    12px;
+  border-radius: 18px;
+
+  height: auto;
 }
 
-/* BUTTON */
 
-.buttons {
-  display: flex;
+/* =========================================================
+   ACTION
+========================================================= */
 
-  justify-content: center;
+.actions {
+  display: grid;
 
-  gap: 12px;
+  grid-template-columns:
+    1fr 1fr;
 
-  margin-top:
-    25px;
+  gap: 14px;
+
+  margin-top: 24px;
 }
 
-.buttons button {
+.actions button {
+  min-height: 56px;
+
+  border-radius: 16px;
+
   border: none;
-
-  padding:
-    15px 28px;
-
-  border-radius:
-    14px;
 
   font-size: 15px;
 
@@ -1602,16 +1907,143 @@ const home = () => {
   cursor: pointer;
 
   transition:
-    transform 0.2s,
-    opacity 0.2s;
+    transform .2s ease,
+    box-shadow .2s ease;
 }
 
-.buttons button:active {
+.actions button:hover {
   transform:
-    scale(0.97);
+    translateY(-2px);
 }
 
-.download {
+.download-btn {
+  color: white;
+
+  background:
+    linear-gradient(
+      135deg,
+      #7c3aed,
+      #db2777
+    );
+
+  box-shadow:
+    0 12px 30px
+    rgba(124,58,237,.25);
+}
+
+.download-btn span {
+  font-size: 22px;
+
+  margin-right: 7px;
+}
+
+.retake-btn {
+  background: white;
+
+  color: #3f3f46;
+
+  border:
+    1px solid #e4e4e7 !important;
+}
+
+
+/* =========================================================
+   INFO
+========================================================= */
+
+.result-info {
+  display: flex;
+
+  justify-content: center;
+  align-items: center;
+
+  gap: 10px;
+
+  margin-top: 22px;
+
+  color: #71717a;
+}
+
+.check {
+  width: 28px;
+  height: 28px;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  border-radius: 50%;
+
+  background: #dcfce7;
+
+  color: #16a34a;
+
+  font-weight: 900;
+}
+
+.result-info div:last-child {
+  display: flex;
+
+  flex-direction: column;
+
+  gap: 2px;
+}
+
+.result-info strong {
+  color: #3f3f46;
+
+  font-size: 13px;
+}
+
+.result-info span {
+  font-size: 12px;
+}
+
+
+/* =========================================================
+   STATE
+========================================================= */
+
+.state-card {
+  padding: 80px 30px;
+
+  text-align: center;
+
+  background: white;
+
+  border-radius: 28px;
+
+  box-shadow:
+    0 20px 60px
+    rgba(0,0,0,.08);
+}
+
+.state-icon {
+  font-size: 55px;
+
+  margin-bottom: 20px;
+}
+
+.state-card h2 {
+  margin: 0 0 8px;
+
+  font-size: 24px;
+}
+
+.state-card p {
+  margin: 0 0 25px;
+
+  color: #71717a;
+}
+
+.primary-btn {
+  border: none;
+
+  padding:
+    14px 24px;
+
+  border-radius: 14px;
+
   background:
     linear-gradient(
       135deg,
@@ -1621,187 +2053,133 @@ const home = () => {
 
   color: white;
 
-  box-shadow:
-    0 10px 30px
-    rgba(124, 58, 237, 0.25);
+  font-weight: 800;
+
+  cursor: pointer;
 }
 
-.retake {
-  background:
-    white;
-
-  color:
-    #52525b;
-
+.error {
   border:
-    1px solid #d4d4d8 !important;
+    1px solid #fecaca;
 }
 
-/* INFO */
 
-.info {
-  text-align: center;
+/* =========================================================
+   LOADER
+========================================================= */
 
-  color:
-    #a1a1aa;
-
-  font-size:
-    13px;
-
-  margin-top:
-    18px;
-}
-
-/* LOADING */
-
-.loading {
-  text-align: center;
-
-  padding:
-    100px 0;
-
-  color:
-    #71717a;
-}
-
-.spinner {
+.loader {
   width: 42px;
   height: 42px;
 
   margin:
-    0 auto 20px;
+    0 auto
+    20px;
 
   border:
-    4px solid #e4e4e7;
+    4px solid #ede9fe;
 
   border-top-color:
     #7c3aed;
 
-  border-radius:
-    50%;
+  border-radius: 50%;
 
   animation:
-    spin 0.8s linear infinite;
+    spin .8s linear infinite;
 }
 
 @keyframes spin {
   to {
-    transform:
-      rotate(360deg);
+    transform: rotate(360deg);
   }
 }
 
-/* EMPTY */
 
-.empty {
-  text-align: center;
+/* =========================================================
+   CANVAS
+========================================================= */
 
-  padding:
-    80px 30px;
+.hidden-canvas {
+  position: absolute;
 
-  background:
-    white;
+  width: 1px;
+  height: 1px;
 
-  border-radius:
-    20px;
+  opacity: 0;
+
+  pointer-events: none;
 }
 
-.empty-icon {
-  font-size:
-    50px;
-}
 
-.empty h2 {
-  margin:
-    15px 0 8px;
-}
-
-.empty p {
-  color:
-    #71717a;
-
-  margin-bottom:
-    25px;
-}
-
-/* CANVAS */
-
-.canvas {
-  display: none;
-}
-
-/* MOBILE */
+/* =========================================================
+   MOBILE
+========================================================= */
 
 @media (max-width: 600px) {
 
   .header {
-    height:
-      62px;
+    height: 68px;
 
     padding:
       0 18px;
   }
 
-  .logo {
-    font-size:
-      17px;
+  .brand {
+    font-size: 17px;
   }
 
-  .template-name {
-    display:
-      none;
+  .template-badge {
+    display: none;
   }
 
   .main {
-    width:
-      94%;
+    width: 94%;
 
     padding:
-      25px 0 60px;
+      32px 0
+      60px;
   }
 
   .heading {
-    margin-bottom:
-      22px;
+    margin-bottom: 25px;
   }
 
   .heading h1 {
-    font-size:
-      30px;
+    font-size: 34px;
   }
 
   .heading p {
-    font-size:
-      13px;
+    font-size: 14px;
   }
 
-  .image-box {
+  .result-card {
+    padding: 8px;
+
+    border-radius: 20px;
+  }
+
+  .result-image {
+    border-radius: 14px;
+  }
+
+  .actions {
+    grid-template-columns: 1fr;
+
+    gap: 10px;
+  }
+
+  .actions button {
+    width: 100%;
+  }
+
+  .result-info {
+    text-align: left;
+
+    justify-content: flex-start;
+
     padding:
-      8px;
-
-    border-radius:
-      18px;
+      0 8px;
   }
 
-  .image-box img {
-    border-radius:
-      10px;
-  }
-
-  .buttons {
-    flex-direction:
-      column;
-
-    gap:
-      10px;
-  }
-
-  .buttons button {
-    width:
-      100%;
-
-    padding:
-      16px;
-  }
 }
 </style>
