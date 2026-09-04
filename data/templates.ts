@@ -38,7 +38,7 @@ export const templates: PhotoTemplate[] = [
     category: 'Vintage',
     photos: 3,
     style: 'polaroid',
-    colors: ['#f5f5f5', '#222']
+    colors: ['#f5f5f5', '#222222']
   },
   {
     id: 5,
