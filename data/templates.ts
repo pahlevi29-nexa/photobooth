@@ -249,135 +249,29 @@ export const templates: PhotoTemplate[] = [
 
   {
     id: 25,
-    name: 'Dirgahayu RI',
+    name: 'Kemerdekaan Indonesia',
     category: 'Event',
     photos: 1,
-    style: 'frame',
-    colors: ['#ffffff', '#b91c1c'],
-
-    frame: '/templates/dirgahayu-ri.png',
-    frameWidth: 474,
-    frameHeight: 632,
-
-    slots: [
-      {
-        x: 58,
-        y: 65,
-        width: 358,
-        height: 478
-      }
-    ]
+    style: 'kemerdekaan',
+    colors: ['#ffffff', '#b91c1c']
   },
 
   {
     id: 26,
-    name: 'Bingkai Masa',
+    name: 'Bingkai Vintage',
     category: 'Vintage',
-    photos: 7,
-    style: 'frame',
-    colors: ['#111111', '#ffffff'],
-
-    frame: '/templates/bingkai-masa.png',
-    frameWidth: 474,
-    frameHeight: 842,
-
-    slots: [
-
-      // KIRI - 3 FOTO
-      {
-        x: 45,
-        y: 285,
-        width: 145,
-        height: 125,
-        rotate: -14
-      },
-
-      {
-        x: 62,
-        y: 420,
-        width: 145,
-        height: 125,
-        rotate: -14
-      },
-
-      {
-        x: 85,
-        y: 555,
-        width: 145,
-        height: 125,
-        rotate: -14
-      },
-
-      // KANAN - 4 FOTO
-      {
-        x: 250,
-        y: 285,
-        width: 160,
-        height: 120,
-        rotate: 7
-      },
-
-      {
-        x: 250,
-        y: 410,
-        width: 160,
-        height: 120,
-        rotate: 7
-      },
-
-      {
-        x: 250,
-        y: 535,
-        width: 160,
-        height: 120,
-        rotate: 7
-      },
-
-      {
-        x: 250,
-        y: 660,
-        width: 160,
-        height: 120,
-        rotate: 7
-      }
-    ]
+    photos: 6,
+    style: 'vintage-collage',
+    colors: ['#111111', '#f5f5f5']
   },
 
   {
     id: 27,
-    name: 'Sweet Camera',
+    name: 'Teddy Memories',
     category: 'Cute',
     photos: 3,
-    style: 'frame',
-    colors: ['#ffffff', '#8b1e3f'],
-
-    frame: '/templates/sweet-camera.png',
-    frameWidth: 474,
-    frameHeight: 842,
-
-    slots: [
-
-      {
-        x: 135,
-        y: 145,
-        width: 205,
-        height: 92
-      },
-
-      {
-        x: 135,
-        y: 240,
-        width: 205,
-        height: 92
-      },
-
-      {
-        x: 135,
-        y: 337,
-        width: 205,
-        height: 155
-      }
-    ]
+    style: 'teddy-frame',
+    colors: ['#ffffff', '#7f1d1d']
   },
 
   {
@@ -385,46 +279,7 @@ export const templates: PhotoTemplate[] = [
     name: 'Breaking News',
     category: 'Aesthetic',
     photos: 4,
-    style: 'frame',
-    colors: ['#f5f1e8', '#292524'],
-
-    frame: '/templates/breaking-news.png',
-    frameWidth: 736,
-    frameHeight: 1104,
-
-    slots: [
-
-      // FOTO UTAMA
-      {
-        x: 35,
-        y: 305,
-        width: 666,
-        height: 430
-      },
-
-      // FOTO KECIL 1
-      {
-        x: 35,
-        y: 890,
-        width: 205,
-        height: 140
-      },
-
-      // FOTO KECIL 2
-      {
-        x: 265,
-        y: 890,
-        width: 205,
-        height: 140
-      },
-
-      // FOTO KECIL 3
-      {
-        x: 495,
-        y: 890,
-        width: 205,
-        height: 140
-      }
-    ]
+    style: 'breaking-news',
+    colors: ['#f5f0df', '#292524']
   }
 ]
