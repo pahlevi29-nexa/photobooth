@@ -47,10 +47,13 @@ const currentPhoto = computed(() => {
   return photos.value.length + 1
 })
 
-const totalPhotos = 4
+const totalPhotos = computed(() => {
+  const count = Number(template.value?.photos ?? 4)
+  return Number.isFinite(count) && count > 0 ? Math.floor(count) : 4
+})
 
 const progress = computed(() => {
-  return `${Math.min(currentPhoto.value, totalPhotos)}/${totalPhotos}`
+  return `${Math.min(currentPhoto.value, totalPhotos.value)}/${totalPhotos.value}`
 })
 
 // =====================================================
@@ -274,7 +277,7 @@ const capturePhoto = async () => {
   }
 
   if (
-    photos.value.length >= totalPhotos
+    photos.value.length >= totalPhotos.value
   ) {
     goToResult()
     return
@@ -352,9 +355,9 @@ const capturePhoto = async () => {
 
   isTakingPhoto.value = false
 
-  // Kalau sudah 4 foto
+  // Kalau jumlah foto sudah sesuai template
   if (
-    photos.value.length >= totalPhotos
+    photos.value.length >= totalPhotos.value
   ) {
     await wait(700)
 
@@ -475,7 +478,7 @@ onBeforeUnmount(() => {
         <p>
           <span v-if="photos.length === 0">
             Pose however you like.
-            We'll take 4 photos.
+            We'll take {{ totalPhotos }} photos.
           </span>
 
           <span
