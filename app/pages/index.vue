@@ -1,133 +1,323 @@
 <template>
-  <div class="home">
-    <div class="overlay"></div>
+  <main class="home">
 
-    <main class="content">
-      <div class="camera-icon">
-        📸
+    <div class="glow glow-one"></div>
+    <div class="glow glow-two"></div>
+
+    <nav>
+      <div class="brand">
+        <span>📸</span>
+        PHOTOBOOTH
       </div>
 
-      <p class="subtitle">
-        CAPTURE YOUR MOMENTS
-      </p>
+      <div class="nav-text">
+        CAPTURE THE MOMENT
+      </div>
+    </nav>
+
+    <section class="hero">
+
+      <div class="badge">
+        ✨ YOUR MOMENT, YOUR STORY
+      </div>
 
       <h1>
-        PHOTO<span>BOOTH</span>
+        Create Your
+        <span>Perfect Moment.</span>
       </h1>
 
-      <p class="description">
-        Abadikan momen terbaikmu dengan cara yang lebih menyenangkan.
+      <p>
+        Ambil foto, pilih template favoritmu,
+        dan abadikan momen dalam satu frame yang indah.
       </p>
 
-      <NuxtLink to="/photobooth" class="start-button">
-        Mulai Photobooth
-        <span>→</span>
+      <NuxtLink
+        to="/photobooth"
+        class="start"
+      >
+        <span>Mulai Photobooth</span>
+        <b>→</b>
       </NuxtLink>
-    </main>
-  </div>
+
+      <div class="features">
+
+        <div>
+          <strong>12+</strong>
+          <small>Templates</small>
+        </div>
+
+        <div>
+          <strong>4</strong>
+          <small>Photos</small>
+        </div>
+
+        <div>
+          <strong>HD</strong>
+          <small>Download</small>
+        </div>
+
+      </div>
+
+    </section>
+
+  </main>
 </template>
 
 <style scoped>
+
 * {
   box-sizing: border-box;
 }
 
 .home {
   min-height: 100vh;
-  position: relative;
   overflow: hidden;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  position: relative;
+
   background:
-    radial-gradient(circle at top left, #4c1d95, transparent 35%),
-    radial-gradient(circle at bottom right, #be185d, transparent 35%),
+    radial-gradient(
+      circle at 20% 20%,
+      rgba(236, 72, 153, .20),
+      transparent 35%
+    ),
+    radial-gradient(
+      circle at 80% 80%,
+      rgba(139, 92, 246, .20),
+      transparent 35%
+    ),
     #09090b;
+
   color: white;
 }
 
-.overlay {
+.glow {
   position: absolute;
-  inset: 0;
-  background:
-    linear-gradient(
-      135deg,
-      rgba(255,255,255,0.03),
-      transparent
-    );
+  width: 400px;
+  height: 400px;
+  border-radius: 50%;
+  filter: blur(120px);
+  pointer-events: none;
 }
 
-.content {
+.glow-one {
+  background: #ec4899;
+  opacity: .12;
+  top: -200px;
+  left: -100px;
+}
+
+.glow-two {
+  background: #8b5cf6;
+  opacity: .12;
+  right: -150px;
+  bottom: -150px;
+}
+
+nav {
+  position: relative;
+  z-index: 5;
+
+  max-width: 1200px;
+  margin: auto;
+  padding: 28px;
+
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.brand {
+  font-weight: 900;
+  letter-spacing: 2px;
+  font-size: 17px;
+}
+
+.brand span {
+  margin-right: 8px;
+}
+
+.nav-text {
+  font-size: 11px;
+  letter-spacing: 3px;
+  color: #71717a;
+}
+
+.hero {
   position: relative;
   z-index: 2;
-  text-align: center;
-  padding: 30px;
-  max-width: 800px;
-}
 
-.camera-icon {
-  width: 90px;
-  height: 90px;
-  margin: 0 auto 30px;
+  min-height: calc(100vh - 90px);
+
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  border-radius: 30px;
-  background: rgba(255,255,255,0.1);
-  backdrop-filter: blur(20px);
-  font-size: 42px;
-  border: 1px solid rgba(255,255,255,0.15);
+
+  text-align: center;
+
+  padding: 40px 25px 100px;
 }
 
-.subtitle {
-  font-size: 13px;
-  letter-spacing: 5px;
-  color: #d8b4fe;
-  margin-bottom: 15px;
+.badge {
+  padding: 9px 16px;
+
+  border: 1px solid rgba(255,255,255,.12);
+
+  background: rgba(255,255,255,.04);
+
+  border-radius: 999px;
+
+  color: #f9a8d4;
+
+  font-size: 10px;
+
+  letter-spacing: 3px;
+
+  margin-bottom: 30px;
 }
 
 h1 {
+  max-width: 900px;
+
   margin: 0;
-  font-size: clamp(55px, 10vw, 110px);
+
+  font-size: clamp(55px, 9vw, 105px);
+
+  line-height: .92;
+
+  letter-spacing: -6px;
+
   font-weight: 900;
-  letter-spacing: -5px;
-  line-height: 0.9;
 }
 
 h1 span {
   display: block;
-  background: linear-gradient(90deg, #f9a8d4, #c4b5fd);
+
+  background: linear-gradient(
+    90deg,
+    #f9a8d4,
+    #c4b5fd
+  );
+
   -webkit-background-clip: text;
+  background-clip: text;
+
+  -webkit-text-fill-color: transparent;
+
   color: transparent;
 }
 
-.description {
-  margin: 30px auto;
-  max-width: 500px;
+.hero p {
+  max-width: 570px;
+
+  margin: 30px 0;
+
   color: #a1a1aa;
-  font-size: 17px;
-  line-height: 1.7;
+
+  line-height: 1.8;
+
+  font-size: 16px;
 }
 
-.start-button {
+.start {
   display: inline-flex;
+
   align-items: center;
-  gap: 15px;
-  padding: 17px 28px;
+
+  gap: 20px;
+
+  padding: 17px 24px 17px 28px;
+
   border-radius: 999px;
-  background: white;
+
   color: #18181b;
+
+  background: white;
+
   text-decoration: none;
-  font-weight: 700;
-  transition: 0.3s;
+
+  font-weight: 800;
+
+  transition: .3s;
 }
 
-.start-button span {
+.start b {
+  display: flex;
+
+  align-items: center;
+  justify-content: center;
+
+  width: 34px;
+  height: 34px;
+
+  border-radius: 50%;
+
+  background: #18181b;
+
+  color: white;
+
+  font-size: 20px;
+}
+
+.start:hover {
+  transform: translateY(-4px);
+
+  box-shadow:
+    0 20px 60px rgba(255,255,255,.15);
+}
+
+.features {
+  display: flex;
+
+  gap: 45px;
+
+  margin-top: 65px;
+}
+
+.features div {
+  display: flex;
+
+  flex-direction: column;
+
+  gap: 5px;
+}
+
+.features strong {
   font-size: 22px;
 }
 
-.start-button:hover {
-  transform: translateY(-4px);
-  box-shadow: 0 15px 40px rgba(255,255,255,0.15);
+.features small {
+  color: #71717a;
+
+  font-size: 10px;
+
+  letter-spacing: 2px;
+
+  text-transform: uppercase;
 }
+
+@media (max-width: 600px) {
+
+  nav {
+    padding: 20px;
+  }
+
+  .nav-text {
+    display: none;
+  }
+
+  h1 {
+    letter-spacing: -3px;
+  }
+
+  .hero p {
+    font-size: 14px;
+  }
+
+  .features {
+    gap: 25px;
+  }
+
+}
+
 </style>
